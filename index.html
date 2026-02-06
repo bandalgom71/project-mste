@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="robots" content="noindex, nofollow">
-    <title>MSTE v5.8 - Global Server Link</title>
+    <title>MSTE v5.9 - Sea of Stars</title>
     
     <script src="stages.js"></script>
 
@@ -61,13 +61,13 @@
 
 <script>
 /**
- * [LOGAN'S PATCH NOTE v5.8]
- * - Network Module: Integrated Google Apps Script URL.
- * - Logic Update: Replaced localStorage with Fetch API (Async).
- * - UI Update: Shows "LOADING..." while fetching data from the planet server.
+ * [LOGAN'S PATCH NOTE v5.9]
+ * - Visual Upgrade: "Sea of Stars" Background.
+ * - Parallax Effect: 3 layers of stars moving at different speeds.
+ * - Continuous Rendering: Stars keep moving even when game is paused/over.
  */
 
-// ★ YOUR SERVER URL ★
+// ★ YOUR SERVER URL (Keep this!) ★
 const SERVER_URL = "https://script.google.com/macros/s/AKfycbyuDE-Zr7x7MdQu-Zj_hO3bl844y4YH7MguctqNkG5nzmGfdF8GtFNTMupG0Tfdm9m-/exec";
 
 const canvas = document.getElementById('gameCanvas');
@@ -83,7 +83,7 @@ const GAME_WIDTH = 600;
 const GAME_HEIGHT = 1000;
 let scale = 1, canvasOffsetX = 0, canvasOffsetY = 0;
 
-let gameState = 'START'; // START, PLAY, TRANSITION, FAIL, GAMEOVER, LEADERBOARD, INPUT, CRASHED, UPLOADING
+let gameState = 'START'; 
 let isDragging = false;
 let lastTime = 0, elapsedTime = 0;
 let stageClearTimer = 0;
@@ -104,61 +104,79 @@ let score = 0;
 let currentLevel = 1;
 let lives = 3;
 
+// --- STAR BACKGROUND SYSTEM ---
+const stars = [];
+const STAR_COUNT = 100;
+
+function initStars() {
+    for (let i = 0; i < STAR_COUNT; i++) {
+        stars.push({
+            x: Math.random() * GAME_WIDTH,
+            y: Math.random() * GAME_HEIGHT,
+            size: Math.random() * 1.5 + 0.5, // 0.5 ~ 2.0
+            speed: Math.random() * 50 + 20,  // 20 ~ 70 (Parallax speed)
+            alpha: Math.random() * 0.5 + 0.3 // Opacity
+        });
+    }
+}
+
+function updateStars(dt) {
+    stars.forEach(star => {
+        star.y += star.speed * dt; // Move down
+        if (star.y > GAME_HEIGHT) {
+            star.y = 0; // Reset to top
+            star.x = Math.random() * GAME_WIDTH; // Randomize X again
+        }
+    });
+}
+
+function drawStars() {
+    ctx.save();
+    stars.forEach(star => {
+        ctx.fillStyle = `rgba(255, 255, 255, ${star.alpha})`;
+        ctx.beginPath();
+        ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
+        ctx.fill();
+    });
+    ctx.restore();
+}
+
+// Initialize Stars Immediately
+initStars();
+
+
 // --- GLOBAL SERVER LOGIC ---
-let globalScores = [
-    { name: 'LGN', score: 5000 }, { name: 'BOT', score: 4000 },
-    { name: 'CPU', score: 3000 }, { name: 'TST', score: 2000 }, { name: 'NEW', score: 1000 }
-];
+let globalScores = [];
 let isFetching = false;
 
-// 1. Fetch Scores (GET)
 function fetchGlobalScores() {
     isFetching = true;
     fetch(SERVER_URL)
         .then(response => response.json())
         .then(data => {
-            if (Array.isArray(data) && data.length > 0) {
-                globalScores = data; // Update global list
-            }
+            if (Array.isArray(data)) globalScores = data;
             isFetching = false;
         })
-        .catch(error => {
-            console.error("Server Comm Error:", error);
-            isFetching = false;
-        });
+        .catch(error => { console.error(error); isFetching = false; });
 }
 
-// 2. Send Score (POST)
 function sendGlobalScore(name, finalScore) {
-    gameState = 'UPLOADING'; // Show loading screen
+    gameState = 'UPLOADING';
     highscoreInput.classList.add('hidden');
-    
-    // Use simple POST with text/plain to avoid CORS preflight issues on some browsers
     fetch(SERVER_URL, {
         method: 'POST',
         body: JSON.stringify({ name: name, score: finalScore })
     })
     .then(response => response.json())
-    .then(result => {
-        // After upload, refresh the list
-        fetchGlobalScores();
-        // Wait a bit then show leaderboard
-        setTimeout(showLeaderboard, 1000); 
-    })
-    .catch(error => {
-        console.error("Upload Error:", error);
-        // Even if error, show leaderboard
-        setTimeout(showLeaderboard, 1000);
-    });
+    .then(result => { fetchGlobalScores(); setTimeout(showLeaderboard, 1000); })
+    .catch(error => { console.error(error); setTimeout(showLeaderboard, 1000); });
 }
 
 function checkIsHighScore(finalScore) {
-    // Compare against the 20th score (or last score if less than 20)
     if (globalScores.length < 20) return true;
     return finalScore > globalScores[globalScores.length - 1].score;
 }
 
-// Initial Fetch on Load
 fetchGlobalScores();
 
 // --- GAME OBJECTS ---
@@ -181,7 +199,7 @@ function getGameCoordinates(clientX, clientY) {
     return { x: (clientX - canvasOffsetX) / scale, y: (clientY - canvasOffsetY) / scale };
 }
 
-// UI Handlers (DOM)
+// UI Handlers
 messageBox.addEventListener('mousedown', handleUiClick);
 messageBox.addEventListener('touchstart', (e) => { e.preventDefault(); handleUiClick(); });
 
@@ -200,7 +218,7 @@ initialsField.addEventListener('keypress', function (e) {
 
 function submitHighScore() {
     const name = initialsField.value.toUpperCase().substring(0, 3) || "UNK";
-    sendGlobalScore(name, score); // Trigger Network Upload
+    sendGlobalScore(name, score);
 }
 
 // --- LEVEL INTERPRETER ---
@@ -262,27 +280,17 @@ function handlePlayerCrash() {
     crashTimer = 0;
     isDragging = false;
     document.body.style.cursor = 'default';
-    
     spawnExplosion(player.x, player.y - 20, 'critical', "SYSTEM FAILURE", 0, 1);
-    
     for(let i=0; i<30; i++) {
         const ang = Math.random() * Math.PI * 2;
         const speed = Math.random() * 500 + 200;
-        particles.push({ 
-            type:'spark', x: player.x, y: player.y - 20, 
-            vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed, 
-            size: Math.random() * 5 + 3, color: '#00ffff', life: 1.5, decay: 1.0 
-        });
+        particles.push({ type:'spark', x: player.x, y: player.y - 20, vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed, size: Math.random() * 5 + 3, color: '#00ffff', life: 1.5, decay: 1.0 });
     }
 }
 
 function gameOver() {
     document.body.style.cursor = 'default';
-    
-    // Fetch latest scores before checking (to be sure)
     fetchGlobalScores();
-    
-    // Check against global scores
     if (checkIsHighScore(score)) {
         gameState = 'INPUT';
         messageBox.classList.add('hidden');
@@ -301,18 +309,10 @@ function showLeaderboard() {
 }
 
 // --- INPUT & UPDATE ---
-window.addEventListener('mousedown', () => { 
-    if (gameState === 'LEADERBOARD') startGame(); 
-    else if (gameState === 'PLAY') isDragging = true; 
-});
-window.addEventListener('touchstart', (e) => { 
-    if (gameState === 'LEADERBOARD') { e.preventDefault(); startGame(); }
-    else if (gameState === 'PLAY') { e.preventDefault(); isDragging = true; }
-}, { passive: false });
-
+window.addEventListener('mousedown', () => { if (gameState === 'LEADERBOARD') startGame(); else if (gameState === 'PLAY') isDragging = true; });
+window.addEventListener('touchstart', (e) => { if (gameState === 'LEADERBOARD') { e.preventDefault(); startGame(); } else if (gameState === 'PLAY') { e.preventDefault(); isDragging = true; } }, { passive: false });
 window.addEventListener('mouseup', () => { if(gameState==='PLAY' && isDragging) { isDragging = false; fireBullet(); }});
 window.addEventListener('touchend', () => { if(gameState==='PLAY' && isDragging) { isDragging = false; fireBullet(); }});
-
 window.addEventListener('mousemove', e => updatePlayerPos(e.clientX, e.clientY));
 window.addEventListener('touchmove', e => { e.preventDefault(); updatePlayerPos(e.touches[0].clientX, e.touches[0].clientY); }, { passive: false });
 
@@ -342,36 +342,26 @@ function fireBullet() {
 
 function spawnExplosion(x, y, tier, textValue, damageVal, multiplier) {
     let finalText = textValue;
-    if (textValue !== "SYSTEM FAILURE" && tier === 'critical' && multiplier > 1) {
-        finalText = `x${multiplier}!`;
-    }
+    if (textValue !== "SYSTEM FAILURE" && tier === 'critical' && multiplier > 1) { finalText = `x${multiplier}!`; }
     let textColor = (textValue === "SYSTEM FAILURE") ? '#0ff' : ((tier === 'critical') ? '#ff0000' : '#ffffff');
-    
     particles.push({ type: 'text', x, y, text: finalText, life: 1.0, vy: -150, isCritical: (tier === 'critical'), color: textColor });
-    
     let count, speed, colors, shockSize;
-    if (textValue === "SYSTEM FAILURE") {
-        count=50; speed=800; colors=['#00ffff', '#ffffff', '#0088ff']; shockSize=500;
-    } else if(tier==='small') { 
-        count=8; speed=300; colors=['#ffff00']; 
-    } else if(tier==='medium') { 
-        count=20; speed=500; colors=['#ff8800','#ff0000']; shockSize=100; 
-    } else { 
-        count=40; speed=800; colors=['#ff0000','#ffffff']; shockSize=300; 
-    } 
-
+    if (textValue === "SYSTEM FAILURE") { count=50; speed=800; colors=['#00ffff', '#ffffff', '#0088ff']; shockSize=500; } 
+    else if(tier==='small') { count=8; speed=300; colors=['#ffff00']; } 
+    else if(tier==='medium') { count=20; speed=500; colors=['#ff8800','#ff0000']; shockSize=100; } 
+    else { count=40; speed=800; colors=['#ff0000','#ffffff']; shockSize=300; } 
     for(let i=0; i<count; i++){
         const ang = Math.random()*Math.PI*2, s = Math.random()*speed;
         particles.push({ type:'spark', x, y, vx:Math.cos(ang)*s, vy:Math.sin(ang)*s, size:Math.random()*4+2, color:colors[i%colors.length], life:1.0, decay:1.5 });
     }
-    if(tier==='critical' || textValue === "SYSTEM FAILURE") {
-        particles.push({ type:'shockwave', x, y, size:10, maxSize:shockSize, color:colors[0], life:1.0, decay:1.0, damage: damageVal, hitList: [], age: 0, multiplier: multiplier });
-    } else if (tier==='medium') {
-        particles.push({ type:'shockwave_visual', x, y, size:10, maxSize:shockSize, color:colors[0], life:1.0, decay:2.0 });
-    }
+    if(tier==='critical' || textValue === "SYSTEM FAILURE") { particles.push({ type:'shockwave', x, y, size:10, maxSize:shockSize, color:colors[0], life:1.0, decay:1.0, damage: damageVal, hitList: [], age: 0, multiplier: multiplier }); } 
+    else if (tier==='medium') { particles.push({ type:'shockwave_visual', x, y, size:10, maxSize:shockSize, color:colors[0], life:1.0, decay:2.0 }); }
 }
 
 function update(dt) {
+    // [UPDATE STARS ALWAYS] for atmosphere
+    updateStars(dt);
+
     if (gameState === 'CRASHED') {
         crashTimer += dt;
         for (let i = particles.length - 1; i >= 0; i--) {
@@ -381,11 +371,7 @@ function update(dt) {
             else if (p.type === 'shockwave') { p.size += (p.maxSize - p.size) * 5 * dt; }
             if (p.life <= 0) particles.splice(i, 1);
         }
-        if (crashTimer > 1.5) {
-            lives--;
-            if (lives <= 0) gameOver();
-            else triggerStageFail();
-        }
+        if (crashTimer > 1.5) { lives--; if (lives <= 0) gameOver(); else triggerStageFail(); }
         return; 
     }
 
@@ -393,11 +379,9 @@ function update(dt) {
     elapsedTime += dt * 1000;
 
     if (enemySpawnData.length === 0 && enemies.length === 0) {
-        stageClearTimer += dt; 
-        if (stageClearTimer > 3.0) showLevelClearScreen();
+        stageClearTimer += dt; if (stageClearTimer > 3.0) showLevelClearScreen();
     }
 
-    // Spawn Enemies
     for (let i = enemySpawnData.length - 1; i >= 0; i--) {
         let data = enemySpawnData[i];
         if (elapsedTime >= data.time) {
@@ -426,16 +410,10 @@ function update(dt) {
 
     for (let i = enemies.length - 1; i >= 0; i--) {
         let en = enemies[i]; en.y += en.speed * dt;
-        if (Math.abs((en.x + en.width/2) - player.x) < (en.width/2 + 20) &&
-            Math.abs((en.y + en.height/2) - (player.y - 20)) < (en.height/2 + 20)) {
-            handlePlayerCrash();
-            return;
+        if (Math.abs((en.x + en.width/2) - player.x) < (en.width/2 + 20) && Math.abs((en.y + en.height/2) - (player.y - 20)) < (en.height/2 + 20)) {
+            handlePlayerCrash(); return;
         }
-        if (en.y > GAME_HEIGHT) {
-            lives--; 
-            if (lives <= 0) { gameOver(); } else { triggerStageFail(); }
-            return; 
-        }
+        if (en.y > GAME_HEIGHT) { lives--; if (lives <= 0) { gameOver(); } else { triggerStageFail(); } return; }
     }
 
     for (let i = bullets.length - 1; i >= 0; i--) {
@@ -485,9 +463,7 @@ function update(dt) {
                                 if (isStrictCrit) spawnExplosion(en.x + en.width/2, en.y + en.height/2, 'critical', "CHAIN!", p.damage, p.multiplier + 1);
                                 else spawnExplosion(en.x + en.width/2, en.y + en.height/2, 'medium', p.damage, 1);
                                 enemies.splice(j, 1);
-                            } else {
-                                spawnExplosion(en.x + en.width/2, en.y + en.height/2, 'small', p.damage, 1);
-                            }
+                            } else { spawnExplosion(en.x + en.width/2, en.y + en.height/2, 'small', p.damage, 1); }
                         }
                     }
                 }
@@ -497,12 +473,14 @@ function update(dt) {
     }
 }
 
-// --- DRAW ---
 function draw() {
     ctx.fillStyle = '#000'; ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+    
+    // [DRAW STARS FIRST]
+    drawStars();
+
     ctx.strokeStyle = '#333'; ctx.lineWidth = 2; ctx.strokeRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
-    // [MODIFIED] Draw Leaderboard (Global)
     if (gameState === 'LEADERBOARD' || gameState === 'UPLOADING') {
         ctx.save();
         ctx.fillStyle = '#0f0'; ctx.font = 'bold 40px Courier New'; ctx.textAlign = 'center';
@@ -519,16 +497,13 @@ function draw() {
         } else {
             ctx.textAlign = 'left';
             let startY = 220;
-            // Draw Global Scores
             globalScores.forEach((entry, idx) => {
                 if (idx >= 20) return;
                 let rank = (idx + 1) + ".";
-                // Highlight if it's the score we just submitted (simple check by name/score match)
                 let color = (entry.score === score && entry.name === initialsField.value) ? '#ff0' : '#fff';
                 ctx.fillStyle = color;
                 ctx.fillText(rank.padEnd(4) + String(entry.name).padEnd(5) + String(entry.score).padStart(8), 150, startY + (idx * 35));
             });
-            
             if (Math.floor(Date.now() / 500) % 2 === 0) {
                 ctx.fillStyle = '#f00'; ctx.textAlign = 'center';
                 ctx.fillText("[ CLICK TO RESTART ]", GAME_WIDTH/2, GAME_HEIGHT - 50);
@@ -539,24 +514,19 @@ function draw() {
     }
 
     if (gameState === 'PLAY' || gameState === 'TRANSITION' || gameState === 'FAIL' || gameState === 'INPUT' || gameState === 'CRASHED') {
-        
         ctx.save();
         if (gameState === 'INPUT' || gameState === 'CRASHED') ctx.globalAlpha = (gameState === 'CRASHED' ? 1.0 : 0.3);
 
-        // UI
         ctx.fillStyle = '#fff'; ctx.font = 'bold 24px Courier New';
         ctx.textAlign = 'left'; ctx.fillText(`LV: ${currentLevel}`, 20, 30);
         ctx.textAlign = 'center'; ctx.fillText(`SCORE: ${score}`, GAME_WIDTH / 2, 30);
         ctx.textAlign = 'right'; ctx.fillStyle = '#f00';
         let hearts = "♥".repeat(Math.max(0, lives)); ctx.fillText(`LIVES: ${hearts}`, GAME_WIDTH - 20, 30);
 
-        // Objects
         items.forEach(it => { ctx.fillStyle = (it.type==='num'?'#ff0':'#0f0'); ctx.font = 'bold 24px Courier New'; ctx.textAlign = 'center'; ctx.fillText(it.val, it.x, it.y); });
         
         enemies.forEach(en => { 
-            ctx.strokeStyle = en.color; 
-            ctx.lineWidth = en.isBoss ? 4 : 2; 
-            ctx.strokeRect(en.x, en.y, en.width, en.height); 
+            ctx.strokeStyle = en.color; ctx.lineWidth = en.isBoss ? 4 : 2; ctx.strokeRect(en.x, en.y, en.width, en.height); 
             ctx.fillStyle = '#fff'; ctx.font = '30px Courier New'; ctx.textAlign = 'center'; ctx.textBaseline='middle'; 
             ctx.fillText(en.hp > 0 ? en.hp : "", en.x + en.width/2, en.y + en.height/2); 
             if (en.isBoss) {
