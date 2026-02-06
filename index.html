@@ -4,12 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="robots" content="noindex, nofollow">
-    <title>MSTE v4.3 - External Data Linked</title>
+    <title>MSTE v5.7 - Final Fix</title>
     
     <script src="stages.js"></script>
 
     <style>
-        body { margin: 0; overflow: hidden; background-color: #222; touch-action: none; user-select: none; display: flex; justify-content: center; align-items: center; height: 100vh; }
+        body { margin: 0; overflow: hidden; background-color: #222; touch-action: none; user-select: none; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: 'Courier New', monospace; }
         canvas { display: block; box-shadow: 0 0 20px rgba(0, 255, 0, 0.2); background-color: #000; }
         
         #ui-layer {
@@ -18,12 +18,25 @@
         }
         
         #message-box {
-            text-align: center; color: #0f0; font-family: 'Courier New', monospace;
-            text-shadow: 0 0 10px #000; pointer-events: auto; cursor: pointer;
+            text-align: center; color: #0f0; text-shadow: 0 0 10px #000; pointer-events: auto; cursor: pointer;
         }
         h1 { font-size: 40px; margin-bottom: 20px; text-shadow: 0 0 20px #0f0; }
         p { font-size: 20px; animation: blink 1s infinite; }
         @keyframes blink { 50% { opacity: 0; } }
+
+        #highscore-input {
+            background: rgba(0, 0, 0, 0.9); border: 2px solid #0f0; padding: 20px; text-align: center; pointer-events: auto;
+            box-shadow: 0 0 20px #0f0; z-index: 10;
+        }
+        #initials {
+            background: #000; border: none; border-bottom: 2px solid #fff; 
+            color: #fff; font-family: 'Courier New', monospace; font-size: 30px; 
+            text-align: center; width: 100px; text-transform: uppercase; outline: none;
+        }
+        #submit-btn {
+            display: block; margin: 20px auto 0; padding: 10px 20px; 
+            background: #0f0; color: #000; border: none; font-weight: bold; font-size: 18px; cursor: pointer;
+        }
 
         .hidden { display: none !important; }
     </style>
@@ -35,58 +48,95 @@
         <h1 id="main-title">MATH SAVE THE EARTH</h1>
         <p id="sub-text">[ CLICK TO START ]</p>
     </div>
+
+    <div id="highscore-input" class="hidden">
+        <h2 style="color:#ff0; margin-top:0;">NEW HIGH SCORE!</h2>
+        <p style="color:#fff;">ENTER INITIALS:</p>
+        <input type="text" id="initials" maxlength="3" autocomplete="off">
+        <button id="submit-btn">ENTER</button>
+    </div>
 </div>
 
 <canvas id="gameCanvas"></canvas>
 
 <script>
 /**
- * [LOGAN'S SYSTEM CORE v4.3]
- * - Architecture: Loads level data from external 'stages.js'.
- * - Mechanics: Chain reaction (strict), Combo multiplier, Effective score.
- * - Physics: Relative scrolling for particles.
- * - Flow: Restart stage on life loss, Game Over on 0 lives.
+ * [LOGAN'S PATCH NOTE v5.7]
+ * 1. Text Bug Fix: 'SYSTEM FAILURE' text logic separated from Combo Multiplier.
+ * - Player death now correctly displays cyan text instead of "X 3 !".
+ * 2. Restart Bug Fix: Added global click listener for LEADERBOARD state.
+ * - Restarting from the Hall of Fame screen works even when DOM UI is hidden.
  */
-
-// --- SECURITY CHECK ---
-// 다른 사람이 접속했을 때 암호를 묻습니다. (테스트할 때 불편하면 주석 처리하세요)
-const PASSCODE = "1234";
-/*
-let userPass = prompt("접속 암호를 입력하게, 요원.");
-if (userPass !== PASSCODE) {
-    alert("접근 거부.");
-    document.body.innerHTML = "<h1 style='color:red; text-align:center; margin-top:50px;'>ACCESS DENIED</h1>";
-    throw new Error("Wrong Password");
-}
-*/
 
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const messageBox = document.getElementById('message-box');
 const mainTitle = document.getElementById('main-title');
 const subText = document.getElementById('sub-text');
+const highscoreInput = document.getElementById('highscore-input');
+const initialsField = document.getElementById('initials');
+const submitBtn = document.getElementById('submit-btn');
 
 const GAME_WIDTH = 600;
 const GAME_HEIGHT = 1000;
 let scale = 1, canvasOffsetX = 0, canvasOffsetY = 0;
 
-// Game State: START, PLAY, TRANSITION, FAIL, GAMEOVER
-let gameState = 'START'; 
+let gameState = 'START'; // START, PLAY, TRANSITION, FAIL, GAMEOVER, LEADERBOARD, INPUT, CRASHED
 let isDragging = false;
 let lastTime = 0, elapsedTime = 0;
+let stageClearTimer = 0;
+let crashTimer = 0; 
 
 const TIME_SCALE = 0.5; 
 const ENEMY_BASE_SPEED = 100;
-const HITBOX_REDUCTION = 20;
 const CHAIN_DMG_DURATION = 0.65; 
 const SPAWN_RATE_NUM = 750; 
 const SPAWN_RATE_SYM = 1500; 
+const COL_WIDTH = 60;
+const ROW_TIME = 450; 
+const START_DELAY = 2000; 
+const ENEMY_WIDTH = 60;
+const ENEMY_HEIGHT = 45;
 
 let score = 0;
 let currentLevel = 1;
 let lives = 3;
 
-const player = { x: GAME_WIDTH / 2, y: GAME_HEIGHT - 150, width: 60, height: 60, expr: "" };
+// --- HIGH SCORE LOGIC ---
+const MAX_HIGHSCORES = 20;
+const STORAGE_KEY = 'MSTE_HIGHSCORES_v1';
+let memoryScores = null;
+
+function loadHighScores() {
+    try {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        if (stored) return JSON.parse(stored);
+    } catch (e) {
+        if (memoryScores) return memoryScores;
+    }
+    return [
+        { name: 'LGN', score: 5000 }, { name: 'DEV', score: 4000 },
+        { name: 'CPU', score: 3000 }, { name: 'AAA', score: 2000 }, { name: 'KIM', score: 1000 }
+    ];
+}
+
+function saveHighScore(name, score) {
+    let scores = loadHighScores();
+    scores.push({ name: name, score: score });
+    scores.sort((a, b) => b.score - a.score); 
+    scores.splice(MAX_HIGHSCORES); 
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(scores)); } catch (e) { memoryScores = scores; }
+    return scores;
+}
+
+function checkIsHighScore(finalScore) {
+    let scores = loadHighScores();
+    if (scores.length < MAX_HIGHSCORES) return true;
+    return finalScore > scores[scores.length - 1].score;
+}
+
+// --- GAME OBJECTS ---
+const player = { x: GAME_WIDTH / 2, y: GAME_HEIGHT - 150, width: 40, height: 40, expr: "" };
 let bullets = [], enemies = [], items = [], particles = [];
 let enemySpawnData = [];
 let lastSpawnNum = 0, lastSpawnSym = 0, numCounter = 1;
@@ -105,128 +155,142 @@ function getGameCoordinates(clientX, clientY) {
     return { x: (clientX - canvasOffsetX) / scale, y: (clientY - canvasOffsetY) / scale };
 }
 
-// UI Handler
+// UI Handlers (DOM)
 messageBox.addEventListener('mousedown', handleUiClick);
 messageBox.addEventListener('touchstart', (e) => { e.preventDefault(); handleUiClick(); });
 
 function handleUiClick() {
-    if (gameState === 'START' || gameState === 'GAMEOVER') {
+    if (gameState === 'START' || gameState === 'LEADERBOARD') {
         startGame();
+    } else if (gameState === 'TRANSITION') {
+        resetStage();
     }
 }
 
-// --- NEW LEVEL GENERATOR (Interpreter) ---
+submitBtn.addEventListener('click', submitHighScore);
+initialsField.addEventListener('keypress', function (e) {
+    if (e.key === 'Enter') submitHighScore();
+});
+
+function submitHighScore() {
+    const name = initialsField.value.toUpperCase().substring(0, 3) || "UNK";
+    saveHighScore(name, score);
+    highscoreInput.classList.add('hidden');
+    showLeaderboard();
+}
+
+// --- LEVEL INTERPRETER ---
 function generateLevel(levelNum) {
     let spawnList = [];
-    
-    // Check if stages.js is loaded
-    if (typeof STAGE_DATA === 'undefined') {
-        alert("CRITICAL ERROR: 'stages.js' file not found!");
-        return [];
-    }
-
-    // 1. Get Config from stages.js
+    if (typeof STAGE_DATA === 'undefined') return [];
     const stageConfig = STAGE_DATA[levelNum - 1];
-    if (!stageConfig) return []; // No data = Game Clear
+    if (!stageConfig) return []; 
 
-    // 2. Parse Waves
-    stageConfig.waves.forEach(wave => {
-        if (wave.type === 'pattern') {
-            for (let t = wave.start; t < wave.end; t += wave.gap) {
-                wave.formations.forEach((unit, idx) => {
-                    spawnList.push({
-                        time: t + (idx * 200),
-                        x: unit.x,
-                        hp: unit.hp
-                    });
-                });
-            }
-        }
-        else if (wave.type === 'sine') {
-            for (let t = wave.start; t < wave.end; t += wave.gap) {
-                const normalizedTime = (t - wave.start) / 1000;
-                const x = 300 + 200 * Math.sin(normalizedTime);
-                spawnList.push({ time: t, x: x, hp: wave.hp });
-            }
-        }
-        else if (wave.type === 'grid') {
-            for (let t = wave.start; t < wave.end; t += wave.gap) {
-                for (let col = 0; col < 5; col++) {
-                    spawnList.push({ time: t, x: 80 + col * 110, hp: wave.hp });
-                }
-            }
-        }
-        else if (wave.type === 'boss') {
-            spawnList.push({
-                time: wave.time,
-                x: wave.x,
-                hp: wave.hp,
-                isBoss: true
-            });
-        }
-    });
-
-    // 3. Sort by time
+    if (stageConfig.spawnList) {
+        stageConfig.spawnList.forEach(unit => {
+            const pixelX = (unit.col - 1) * COL_WIDTH + (COL_WIDTH / 2);
+            const spawnTime = (unit.row - 1) * ROW_TIME + START_DELAY;
+            spawnList.push({ time: spawnTime, x: pixelX, hp: unit.hp, isBoss: unit.isBoss || false });
+        });
+    }
     spawnList.sort((a, b) => a.time - b.time);
     return spawnList;
 }
 
-// --- GAME FLOW CONTROL ---
-function startGame() {
-    score = 0; currentLevel = 1; lives = 3;
-    resetStage();
-}
+// --- GAME FLOW ---
+function startGame() { score = 0; currentLevel = 1; lives = 3; resetStage(); }
 
 function resetStage() {
     gameState = 'PLAY';
     messageBox.classList.add('hidden');
+    highscoreInput.classList.add('hidden');
     document.body.style.cursor = 'none';
     
-    elapsedTime = 0;
+    elapsedTime = 0; stageClearTimer = 0; crashTimer = 0;
     player.expr = "";
     bullets.length = 0; enemies.length = 0; items.length = 0; particles.length = 0;
     
-    // Load Data from JS file
     enemySpawnData = generateLevel(currentLevel);
-    
     lastTime = performance.now();
     isDragging = true; 
     requestAnimationFrame(gameLoop);
 }
 
-function startLevelTransition() {
+function showLevelClearScreen() {
     gameState = 'TRANSITION';
     currentLevel++;
     messageBox.classList.remove('hidden');
     mainTitle.innerText = "STAGE CLEAR!";
-    subText.innerText = `NEXT: LEVEL ${currentLevel}`;
+    subText.innerText = `[ CLICK FOR LEVEL ${currentLevel} ]`; 
     subText.style.color = '#fff';
-    setTimeout(() => { resetStage(); }, 3000);
 }
 
 function triggerStageFail() {
     gameState = 'FAIL';
     messageBox.classList.remove('hidden');
     mainTitle.innerText = "DEFENSE FAILED!";
-    subText.innerText = "RESTARTING STAGE...";
-    subText.style.color = '#f50';
+    subText.innerText = "RESTARTING STAGE..."; subText.style.color = '#f50';
     setTimeout(() => { resetStage(); }, 2000);
 }
 
-function gameOver() {
-    gameState = 'GAMEOVER';
+function handlePlayerCrash() {
+    gameState = 'CRASHED';
+    crashTimer = 0;
+    isDragging = false;
     document.body.style.cursor = 'default';
-    messageBox.classList.remove('hidden');
-    mainTitle.innerText = "GAME OVER";
-    subText.innerText = `SCORE: ${score}\n[ CLICK TO RETRY ]`;
-    subText.style.color = '#f00';
+    
+    // [FIX 1] Multiplier passed as 1 to prevent "x3!" text
+    spawnExplosion(player.x, player.y - 20, 'critical', "SYSTEM FAILURE", 0, 1);
+    
+    for(let i=0; i<30; i++) {
+        const ang = Math.random() * Math.PI * 2;
+        const speed = Math.random() * 500 + 200;
+        particles.push({ 
+            type:'spark', x: player.x, y: player.y - 20, 
+            vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed, 
+            size: Math.random() * 5 + 3, color: '#00ffff', life: 1.5, decay: 1.0 
+        });
+    }
 }
 
-// Input Handling
-window.addEventListener('mousedown', () => { if(gameState==='PLAY') isDragging = true; });
+function gameOver() {
+    document.body.style.cursor = 'default';
+    let isHigh = false;
+    try { isHigh = checkIsHighScore(score); } catch(e) { isHigh = true; }
+
+    if (isHigh) {
+        gameState = 'INPUT';
+        messageBox.classList.add('hidden');
+        highscoreInput.classList.remove('hidden');
+        initialsField.value = "";
+        initialsField.focus();
+    } else {
+        showLeaderboard();
+    }
+}
+
+function showLeaderboard() {
+    gameState = 'LEADERBOARD';
+    messageBox.classList.add('hidden');
+    highscoreInput.classList.add('hidden');
+}
+
+// --- INPUT & UPDATE ---
+// [FIX 2] Global Input Listeners handle LEADERBOARD restart
+window.addEventListener('mousedown', () => { 
+    if (gameState === 'LEADERBOARD') startGame(); 
+    else if (gameState === 'PLAY') isDragging = true; 
+});
+window.addEventListener('touchstart', (e) => { 
+    if (gameState === 'LEADERBOARD') { e.preventDefault(); startGame(); }
+    else if (gameState === 'PLAY') { e.preventDefault(); isDragging = true; }
+}, { passive: false });
+
 window.addEventListener('mouseup', () => { if(gameState==='PLAY' && isDragging) { isDragging = false; fireBullet(); }});
-window.addEventListener('touchstart', (e) => { e.preventDefault(); if(gameState==='PLAY') isDragging = true; }, { passive: false });
 window.addEventListener('touchend', () => { if(gameState==='PLAY' && isDragging) { isDragging = false; fireBullet(); }});
+
+window.addEventListener('mousemove', e => updatePlayerPos(e.clientX, e.clientY));
+window.addEventListener('touchmove', e => { e.preventDefault(); updatePlayerPos(e.touches[0].clientX, e.touches[0].clientY); }, { passive: false });
 
 function updatePlayerPos(clientX, clientY) {
     if (gameState !== 'PLAY' || !isDragging) return;
@@ -234,10 +298,7 @@ function updatePlayerPos(clientX, clientY) {
     player.x = Math.max(30, Math.min(GAME_WIDTH - 30, pos.x));
     player.y = Math.max(50, Math.min(GAME_HEIGHT - 50, pos.y - 80));
 }
-window.addEventListener('mousemove', e => updatePlayerPos(e.clientX, e.clientY));
-window.addEventListener('touchmove', e => { e.preventDefault(); updatePlayerPos(e.touches[0].clientX, e.touches[0].clientY); }, { passive: false });
 
-// --- LOGIC ---
 function updateExpression(value) {
     const isNum = !isNaN(value); const strVal = String(value);
     let tokens = player.expr.match(/\d+|[+\-×÷]/g);
@@ -257,32 +318,61 @@ function fireBullet() {
 
 function spawnExplosion(x, y, tier, textValue, damageVal, multiplier) {
     let finalText = textValue;
-    if (tier === 'critical' && multiplier > 1) finalText = `x${multiplier}!`;
-    particles.push({ type: 'text', x, y, text: finalText, life: 1.0, vy: -150, isCritical: (tier === 'critical'), color: (tier === 'critical') ? '#ff0000' : '#ffffff' });
+    // [FIX 1] Do not overwrite specific system messages with combo text
+    if (textValue !== "SYSTEM FAILURE" && tier === 'critical' && multiplier > 1) {
+        finalText = `x${multiplier}!`;
+    }
+    
+    let textColor = (textValue === "SYSTEM FAILURE") ? '#0ff' : ((tier === 'critical') ? '#ff0000' : '#ffffff');
+    
+    particles.push({ type: 'text', x, y, text: finalText, life: 1.0, vy: -150, isCritical: (tier === 'critical'), color: textColor });
+    
     let count, speed, colors, shockSize;
-    if(tier==='small') { count=8; speed=300; colors=['#ffff00']; }
-    else if(tier==='medium') { count=20; speed=500; colors=['#ff8800','#ff0000']; shockSize=100; }
-    else { count=40; speed=800; colors=['#ff0000','#ffffff']; shockSize=300; } 
+    if (textValue === "SYSTEM FAILURE") {
+        count=50; speed=800; colors=['#00ffff', '#ffffff', '#0088ff']; shockSize=500;
+    } else if(tier==='small') { 
+        count=8; speed=300; colors=['#ffff00']; 
+    } else if(tier==='medium') { 
+        count=20; speed=500; colors=['#ff8800','#ff0000']; shockSize=100; 
+    } else { 
+        count=40; speed=800; colors=['#ff0000','#ffffff']; shockSize=300; 
+    } 
+
     for(let i=0; i<count; i++){
         const ang = Math.random()*Math.PI*2, s = Math.random()*speed;
         particles.push({ type:'spark', x, y, vx:Math.cos(ang)*s, vy:Math.sin(ang)*s, size:Math.random()*4+2, color:colors[i%colors.length], life:1.0, decay:1.5 });
     }
-    if(tier==='critical') {
+    if(tier==='critical' || textValue === "SYSTEM FAILURE") {
         particles.push({ type:'shockwave', x, y, size:10, maxSize:shockSize, color:colors[0], life:1.0, decay:1.0, damage: damageVal, hitList: [], age: 0, multiplier: multiplier });
     } else if (tier==='medium') {
         particles.push({ type:'shockwave_visual', x, y, size:10, maxSize:shockSize, color:colors[0], life:1.0, decay:2.0 });
     }
 }
 
-// --- UPDATE LOOP ---
 function update(dt) {
+    if (gameState === 'CRASHED') {
+        crashTimer += dt;
+        for (let i = particles.length - 1; i >= 0; i--) {
+            let p = particles[i]; p.life -= (p.decay || 1.0) * dt;
+            if (p.type === 'text') p.y += p.vy * dt;
+            else if (p.type === 'spark') { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.9; p.vy *= 0.9; }
+            else if (p.type === 'shockwave') { p.size += (p.maxSize - p.size) * 5 * dt; }
+            if (p.life <= 0) particles.splice(i, 1);
+        }
+        if (crashTimer > 1.5) {
+            lives--;
+            if (lives <= 0) gameOver();
+            else triggerStageFail();
+        }
+        return; 
+    }
+
     if (gameState !== 'PLAY') return;
     elapsedTime += dt * 1000;
-    
-    // Level Clear Check
+
     if (enemySpawnData.length === 0 && enemies.length === 0) {
-        startLevelTransition();
-        return;
+        stageClearTimer += dt; 
+        if (stageClearTimer > 3.0) showLevelClearScreen();
     }
 
     // Spawn Enemies
@@ -290,11 +380,8 @@ function update(dt) {
         let data = enemySpawnData[i];
         if (elapsedTime >= data.time) {
             let width, height, speed, color, isBoss;
-            if (data.isBoss) {
-                width = 150; height = 100; speed = ENEMY_BASE_SPEED * 0.3; color = '#ff0000'; isBoss = true;
-            } else {
-                width = 60 + (String(data.hp).length * 10); height = 60; speed = ENEMY_BASE_SPEED; color = '#fff'; isBoss = false;
-            }
+            if (data.isBoss) { width = 150; height = 100; speed = ENEMY_BASE_SPEED * 0.3; color = '#ff0000'; isBoss = true; } 
+            else { width = ENEMY_WIDTH; height = ENEMY_HEIGHT; speed = ENEMY_BASE_SPEED; color = '#fff'; isBoss = false; }
             const drawX = data.x - (width / 2);
             enemies.push({ x: drawX, y: -80, width, height, hp: data.hp, maxHp: data.hp, speed, color, isBoss });
             enemySpawnData.splice(i, 1);
@@ -302,10 +389,11 @@ function update(dt) {
     }
     
     lastSpawnNum += dt * 1000; lastSpawnSym += dt * 1000;
-    if (lastSpawnNum > SPAWN_RATE_NUM) { items.push({ type:'num', val:numCounter, x:Math.random()*(GAME_WIDTH-60)+30, y:-40, speed:180 + Math.random()*60 }); numCounter=(numCounter%10)+1; lastSpawnNum = 0; }
-    if (lastSpawnSym > SPAWN_RATE_SYM) { items.push({ type:'sym', val:['+','+','-','×','÷'][Math.floor(Math.random()*5)], x:Math.random()*(GAME_WIDTH-60)+30, y:-40, speed:120 + Math.random()*60 }); lastSpawnSym = 0; }
+    if (enemies.length > 0 || enemySpawnData.length > 0) {
+        if (lastSpawnNum > SPAWN_RATE_NUM) { items.push({ type:'num', val:numCounter, x:Math.random()*(GAME_WIDTH-60)+30, y:-40, speed:180 + Math.random()*60 }); numCounter=(numCounter%10)+1; lastSpawnNum = 0; }
+        if (lastSpawnSym > SPAWN_RATE_SYM) { items.push({ type:'sym', val:['+','+','-','×','÷'][Math.floor(Math.random()*5)], x:Math.random()*(GAME_WIDTH-60)+30, y:-40, speed:120 + Math.random()*60 }); lastSpawnSym = 0; }
+    }
 
-    // Items
     for (let i = items.length - 1; i >= 0; i--) {
         let it = items[i]; it.y += it.speed * dt;
         if (isDragging && Math.abs(it.x - player.x) < 40 && Math.abs(it.y - player.y) < 40) {
@@ -314,9 +402,13 @@ function update(dt) {
         if (it.y > GAME_HEIGHT) items.splice(i, 1);
     }
 
-    // Enemies & Lives
     for (let i = enemies.length - 1; i >= 0; i--) {
         let en = enemies[i]; en.y += en.speed * dt;
+        if (Math.abs((en.x + en.width/2) - player.x) < (en.width/2 + 20) &&
+            Math.abs((en.y + en.height/2) - (player.y - 20)) < (en.height/2 + 20)) {
+            handlePlayerCrash();
+            return;
+        }
         if (en.y > GAME_HEIGHT) {
             lives--; 
             if (lives <= 0) { gameOver(); } else { triggerStageFail(); }
@@ -324,7 +416,6 @@ function update(dt) {
         }
     }
 
-    // Bullets
     for (let i = bullets.length - 1; i >= 0; i--) {
         let b = bullets[i]; b.y -= b.speed * dt;
         for (let j = enemies.length - 1; j >= 0; j--) {
@@ -336,7 +427,7 @@ function update(dt) {
                 let isCrit = (en.hp === dmg);
                 let tier = (en.hp - dmg <= 0) ? (isCrit ? 'critical' : 'medium') : 'small';
                 let actualDmg = Math.min(en.hp, dmg);
-                score += actualDmg; // Base multiplier 1
+                score += actualDmg;
                 spawnExplosion(en.x + en.width/2, en.y + en.height/2, tier, isCrit ? "CRITICAL!" : dmg, dmg, 2);
                 en.hp -= dmg;
                 if (en.hp <= 0) enemies.splice(j, 1);
@@ -347,11 +438,9 @@ function update(dt) {
         if (b.y < -100) bullets.splice(i, 1);
     }
 
-    // Particles (Relative Scroll)
     for (let i = particles.length - 1; i >= 0; i--) {
         let p = particles[i]; p.life -= (p.decay || 1.0) * dt;
-        p.y += ENEMY_BASE_SPEED * dt; // Scroll with world
-        
+        p.y += ENEMY_BASE_SPEED * dt; 
         if (p.type === 'text') p.y += p.vy * dt;
         else if (p.type === 'spark') { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.9; p.vy *= 0.9; p.vy += 10; }
         else if (p.type === 'shockwave' || p.type === 'shockwave_visual') {
@@ -364,7 +453,7 @@ function update(dt) {
                         if (en.y < 0 || en.y > GAME_HEIGHT) continue;
                         if (p.hitList.includes(en)) continue;
                         let dist = Math.hypot((en.x + en.width/2) - p.x, (en.y + en.height/2) - p.y);
-                        if (dist < p.size - HITBOX_REDUCTION) {
+                        if (dist < p.size - 10) {
                             let isStrictCrit = (en.hp === p.damage); 
                             let actualDmg = Math.min(en.hp, p.damage);
                             score += actualDmg * p.multiplier;
@@ -386,30 +475,46 @@ function update(dt) {
     }
 }
 
+// --- DRAW ---
 function draw() {
     ctx.fillStyle = '#000'; ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
     ctx.strokeStyle = '#333'; ctx.lineWidth = 2; ctx.strokeRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
-    if (gameState === 'PLAY' || gameState === 'TRANSITION' || gameState === 'FAIL') {
-        // UI
+    if (gameState === 'LEADERBOARD') {
+        const scores = loadHighScores();
         ctx.save();
+        ctx.fillStyle = '#0f0'; ctx.font = 'bold 40px Courier New'; ctx.textAlign = 'center';
+        ctx.fillText("HALL OF FAME", GAME_WIDTH/2, 100);
+        ctx.fillStyle = '#fff'; ctx.font = '24px Courier New';
+        ctx.fillText(`YOUR SCORE: ${score}`, GAME_WIDTH/2, 150);
+        ctx.textAlign = 'left';
+        let startY = 220;
+        scores.forEach((entry, idx) => {
+            if (idx >= 20) return;
+            let rank = (idx + 1) + ".";
+            let color = (entry.score === score && entry.name === initialsField.value) ? '#ff0' : '#fff';
+            ctx.fillStyle = color;
+            ctx.fillText(rank.padEnd(4) + entry.name.padEnd(5) + String(entry.score).padStart(8), 150, startY + (idx * 35));
+        });
+        if (Math.floor(Date.now() / 500) % 2 === 0) {
+            ctx.fillStyle = '#f00'; ctx.textAlign = 'center';
+            ctx.fillText("[ CLICK TO RESTART ]", GAME_WIDTH/2, GAME_HEIGHT - 50);
+        }
+        ctx.restore();
+        return;
+    }
+
+    if (gameState === 'PLAY' || gameState === 'TRANSITION' || gameState === 'FAIL' || gameState === 'INPUT' || gameState === 'CRASHED') {
+        
+        ctx.save();
+        if (gameState === 'INPUT' || gameState === 'CRASHED') ctx.globalAlpha = (gameState === 'CRASHED' ? 1.0 : 0.3);
+
+        // UI
         ctx.fillStyle = '#fff'; ctx.font = 'bold 24px Courier New';
         ctx.textAlign = 'left'; ctx.fillText(`LV: ${currentLevel}`, 20, 30);
         ctx.textAlign = 'center'; ctx.fillText(`SCORE: ${score}`, GAME_WIDTH / 2, 30);
         ctx.textAlign = 'right'; ctx.fillStyle = '#f00';
         let hearts = "♥".repeat(Math.max(0, lives)); ctx.fillText(`LIVES: ${hearts}`, GAME_WIDTH - 20, 30);
-        ctx.restore();
-
-        // Player
-        if (player.expr !== "") {
-            ctx.save(); ctx.font = 'bold 40px Courier New'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-            ctx.shadowColor = '#0f0'; ctx.shadowBlur = 10; ctx.fillStyle = '#fff';
-            ctx.fillText(player.expr, GAME_WIDTH / 2, GAME_HEIGHT - 20); ctx.restore();
-        }
-        ctx.save(); if (!isDragging && gameState === 'PLAY') ctx.globalAlpha = 0.3;
-        ctx.translate(player.x, player.y); ctx.fillStyle = '#0ff';
-        ctx.beginPath(); ctx.moveTo(0, -30); ctx.lineTo(-20, 20); ctx.lineTo(0, 10); ctx.lineTo(20, 20); ctx.closePath(); ctx.fill();
-        ctx.restore();
 
         // Objects
         items.forEach(it => { ctx.fillStyle = (it.type==='num'?'#ff0':'#0f0'); ctx.font = 'bold 24px Courier New'; ctx.textAlign = 'center'; ctx.fillText(it.val, it.x, it.y); });
@@ -428,6 +533,18 @@ function draw() {
         
         bullets.forEach(b => { ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(Math.PI/2); ctx.fillStyle = '#aaf'; ctx.font = '20px Courier New'; ctx.textAlign = 'center'; ctx.fillText(b.text, 0, 0); ctx.restore(); });
         
+        if (gameState !== 'CRASHED' && gameState !== 'FAIL' && gameState !== 'GAMEOVER') {
+            if (player.expr !== "") {
+                ctx.save(); ctx.font = 'bold 40px Courier New'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+                ctx.shadowColor = '#0f0'; ctx.shadowBlur = 10; ctx.fillStyle = '#fff';
+                ctx.fillText(player.expr, GAME_WIDTH / 2, GAME_HEIGHT - 20); ctx.restore();
+            }
+            ctx.save(); if (!isDragging && gameState === 'PLAY') ctx.globalAlpha = 0.3;
+            ctx.translate(player.x, player.y); ctx.fillStyle = '#0ff';
+            ctx.beginPath(); ctx.moveTo(0, -30); ctx.lineTo(-20, 20); ctx.lineTo(0, 10); ctx.lineTo(20, 20); ctx.closePath(); ctx.fill();
+            ctx.restore();
+        }
+
         particles.forEach(p => {
             ctx.save(); ctx.globalAlpha = p.life;
             if (p.type === 'text') { ctx.translate(p.x, p.y); ctx.fillStyle = p.color; ctx.font = (p.isCritical?'bold 40px':'30px') + ' Courier New'; ctx.textAlign = 'center'; ctx.fillText(p.text, 0, 0); }
@@ -435,13 +552,14 @@ function draw() {
             else if (p.type === 'shockwave' || p.type === 'shockwave_visual') { ctx.strokeStyle = p.color; ctx.lineWidth = 5 * p.life; ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI*2); ctx.stroke(); }
             ctx.restore();
         });
+        ctx.restore();
     }
 }
 
 function gameLoop(currentTime) {
     const dt = (currentTime - lastTime) / 1000;
     lastTime = currentTime;
-    if (gameState === 'PLAY') { if (dt < 0.1) { update(dt * TIME_SCALE); } }
+    if (dt < 0.1) { update(dt * TIME_SCALE); } 
     draw(); 
     requestAnimationFrame(gameLoop);
 }
