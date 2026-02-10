@@ -85,13 +85,15 @@ let score = 0;
 let currentLevel = 1;
 let lives = 3;
 
-// --- [AUDIO SYSTEM: MULTI-TRACK SHUFFLE] ---
+// --- [AUDIO SYSTEM: STABLE HYBRID RADIO] ---
 const SoundManager = {
     ctx: null, 
     currentBgm: null, 
+    staticNode: null,   
+    staticGain: null,   
+    masterGain: null,   
     isMuted: false,
     
-    // BGM 목록
     tracks: [
         'test_bgm_01.mp3',
         'test_bgm_02.mp3',
@@ -101,61 +103,99 @@ const SoundManager = {
 
     init: function() {
         if (this.ctx) return;
+        
+        // 1. Web Audio API 초기화 (효과음 & 잡음용)
         window.AudioContext = window.AudioContext || window.webkitAudioContext;
         this.ctx = new AudioContext();
+        
+        this.masterGain = this.ctx.createGain();
+        this.masterGain.connect(this.ctx.destination);
+
+        // 2. 라디오 잡음 생성 시작
+        this.createRadioStatic();
     },
 
-    // 랜덤 BGM 재생 (이전 곡 정지 후 재생)
+    // [PROCEDURAL NOISE] 화이트 노이즈 생성기
+    createRadioStatic: function() {
+        if (!this.ctx) return;
+        
+        const bufferSize = 2 * this.ctx.sampleRate; 
+        const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+
+        for (let i = 0; i < bufferSize; i++) {
+            data[i] = (Math.random() * 2 - 1) * 0.2; // 노이즈 생성
+        }
+
+        this.staticNode = this.ctx.createBufferSource();
+        this.staticNode.buffer = buffer;
+        this.staticNode.loop = true;
+
+        // 노이즈 볼륨 (음악을 방해하지 않게 은은하게)
+        this.staticGain = this.ctx.createGain();
+        this.staticGain.gain.value = 0.03; // 3% 볼륨 (너무 시끄러우면 여기를 줄이게)
+
+        this.staticNode.connect(this.staticGain);
+        this.staticGain.connect(this.masterGain); 
+        
+        this.staticNode.start();
+    },
+
+    // [BGM PLAYER] HTML5 Audio 사용 (보안 문제 해결)
     playRandomBGM: function() {
+        // 기존 음악 정지
         if (this.currentBgm) {
             this.currentBgm.pause();
             this.currentBgm.currentTime = 0;
         }
         
-        // 0~3 사이 랜덤 인덱스
         const idx = Math.floor(Math.random() * this.tracks.length);
         const selectedTrack = this.tracks[idx];
         
         this.currentBgm = new Audio(selectedTrack);
         this.currentBgm.loop = true;
-        this.currentBgm.volume = 0.4; // 배경음 볼륨 적절히 조절
+        this.currentBgm.volume = 0.5; // BGM 볼륨 (잡음과 밸런스 맞춤)
         
-        this.currentBgm.play().catch(e => console.log("BGM Play failed (interaction needed):", e));
-        console.log(`🎵 Playing: ${selectedTrack}`);
+        // 브라우저 정책상 클릭 없이는 재생 실패할 수 있음 (에러 로그만 남기고 넘어감)
+        this.currentBgm.play().catch(e => console.log("Waiting for interaction to play BGM..."));
+        console.log(`🎵 Radio Tuned to: ${selectedTrack}`);
     },
 
     stopBGM: function() {
         if (this.currentBgm) {
             this.currentBgm.pause();
-            this.currentBgm.currentTime = 0;
         }
     },
 
-    // 효과음: 부드러운 사인파 폭발음
+    // 효과음: 부드러운 사인파
     playBassExplosion: function(chainCount = 0) {
         if (!this.ctx || this.isMuted) return;
         const now = this.ctx.currentTime;
         const osc = this.ctx.createOscillator();
         const gain = this.ctx.createGain();
+        
         osc.type = 'sine'; 
         const baseFreq = 110.0; 
         const freq = baseFreq * Math.pow(1.05946, chainCount % 12); 
         osc.frequency.setValueAtTime(freq, now);
-        gain.gain.cancelScheduledValues(now);
+        
         gain.gain.setValueAtTime(0, now);
-        gain.gain.linearRampToValueAtTime(0.9, now + 0.05); 
+        gain.gain.linearRampToValueAtTime(0.8, now + 0.05); 
         gain.gain.exponentialRampToValueAtTime(0.001, now + 1.2); 
-        osc.connect(gain); gain.connect(this.ctx.destination);
-        osc.start(now); osc.stop(now + 1.2);
+        
+        osc.connect(gain); 
+        gain.connect(this.masterGain);
+        
+        osc.start(now); 
+        osc.stop(now + 1.2);
     },
 
-    // 효과음: 아이템 획득
     playItemGet: function(type) {
         if (!this.ctx || this.isMuted) return;
         const now = this.ctx.currentTime;
         const osc = this.ctx.createOscillator();
         const gain = this.ctx.createGain();
-        gain.gain.cancelScheduledValues(now);
+        
         if (type === 'num') {
             osc.type = 'sine'; osc.frequency.setValueAtTime(880, now); 
             gain.gain.setValueAtTime(0.2, now); gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
@@ -163,7 +203,9 @@ const SoundManager = {
             osc.type = 'square'; osc.frequency.setValueAtTime(440, now); osc.frequency.linearRampToValueAtTime(880, now + 0.05);
             gain.gain.setValueAtTime(0.1, now); gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
         }
-        osc.connect(gain); gain.connect(this.ctx.destination);
+        
+        osc.connect(gain); 
+        gain.connect(this.masterGain);
         osc.start(now); osc.stop(now + 0.1);
     }
 };
@@ -282,7 +324,6 @@ function resetStage() {
 function showLevelClearScreen() {
     gameState = 'TRANSITION'; currentLevel++; messageBox.classList.remove('hidden');
     mainTitle.innerText = "STAGE CLEAR!"; subText.innerText = `[ CLICK FOR LEVEL ${currentLevel} ]`; subText.style.color = '#fff';
-    SoundManager.stopBGM(); // 클리어 화면에서는 잠시 끔 (선택 사항)
 }
 function triggerStageFail() {
     gameState = 'FAIL'; messageBox.classList.remove('hidden');
