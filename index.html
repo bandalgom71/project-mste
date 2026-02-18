@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="robots" content="noindex, nofollow">
-    <title>MSTE v7.0 - Funky Shuffle</title>
+    <title>MSTE v8.5 - Logic Patch</title>
     
     <script src="stages.js"></script>
 
@@ -42,11 +42,11 @@
 
 <script>
 /**
- * [LOGAN'S PATCH v7.0]
- * - Base: v5.9 (Sea of Stars) - Most Stable Version.
- * - Audio Upgrade: 
- * 1. 4 Random BGMs (Shuffle on Stage Start/Restart).
- * 2. Sine Wave SFX integrated.
+ * [LOGAN'S PATCH v8.5]
+ * - Base: v7.0 Stable
+ * - ADDED: 0.2s Pickup Cooldown Rule.
+ * - ADDED: Debris (Shard) System with Gravity.
+ * - NOTE: Graphics are kept as default (Rectangles).
  */
 
 const SERVER_URL = "https://script.google.com/macros/s/AKfycbyuDE-Zr7x7MdQu-Zj_hO3bl844y4YH7MguctqNkG5nzmGfdF8GtFNTMupG0Tfdm9m-/exec";
@@ -70,6 +70,11 @@ let lastTime = 0, elapsedTime = 0;
 let stageClearTimer = 0;
 let crashTimer = 0; 
 
+// [LOGAN: CONFIG - 0.2s Rule Added]
+let pickupTimer = 0; 
+const PICKUP_COOLDOWN = 0.2; 
+// ---------------------------------
+
 const TIME_SCALE = 0.5; 
 const ENEMY_BASE_SPEED = 100;
 const CHAIN_DMG_DURATION = 0.65; 
@@ -85,174 +90,80 @@ let score = 0;
 let currentLevel = 1;
 let lives = 3;
 
-// --- [AUDIO SYSTEM: STABLE HYBRID RADIO] ---
+// --- AUDIO SYSTEM (No Changes) ---
 const SoundManager = {
-    ctx: null, 
-    currentBgm: null, 
-    staticNode: null,   
-    staticGain: null,   
-    masterGain: null,   
-    isMuted: false,
-    
-    tracks: [
-        'test_bgm_01.mp3',
-        'test_bgm_02.mp3',
-        'test_bgm_03.mp3',
-        'test_bgm_04.mp3'
-    ],
-
+    ctx: null, currentBgm: null, staticNode: null, staticGain: null, masterGain: null, isMuted: false,
+    tracks: ['test_bgm_01.mp3', 'test_bgm_02.mp3', 'test_bgm_03.mp3', 'test_bgm_04.mp3'],
     init: function() {
         if (this.ctx) return;
-        
-        // 1. Web Audio API 초기화 (효과음 & 잡음용)
         window.AudioContext = window.AudioContext || window.webkitAudioContext;
         this.ctx = new AudioContext();
-        
         this.masterGain = this.ctx.createGain();
         this.masterGain.connect(this.ctx.destination);
-
-        // 2. 라디오 잡음 생성 시작
         this.createRadioStatic();
     },
-
-    // [PROCEDURAL NOISE] 화이트 노이즈 생성기
     createRadioStatic: function() {
         if (!this.ctx) return;
-        
         const bufferSize = 2 * this.ctx.sampleRate; 
         const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
         const data = buffer.getChannelData(0);
-
-        for (let i = 0; i < bufferSize; i++) {
-            data[i] = (Math.random() * 2 - 1) * 0.2; // 노이즈 생성
-        }
-
+        for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * 0.2; 
         this.staticNode = this.ctx.createBufferSource();
         this.staticNode.buffer = buffer;
         this.staticNode.loop = true;
-
-        // 노이즈 볼륨 (음악을 방해하지 않게 은은하게)
         this.staticGain = this.ctx.createGain();
-        this.staticGain.gain.value = 0.03; // 3% 볼륨 (너무 시끄러우면 여기를 줄이게)
-
+        this.staticGain.gain.value = 0.03; 
         this.staticNode.connect(this.staticGain);
         this.staticGain.connect(this.masterGain); 
-        
         this.staticNode.start();
     },
-
-    // [BGM PLAYER] HTML5 Audio 사용 (보안 문제 해결)
     playRandomBGM: function() {
-        // 기존 음악 정지
-        if (this.currentBgm) {
-            this.currentBgm.pause();
-            this.currentBgm.currentTime = 0;
-        }
-        
+        if (this.currentBgm) { this.currentBgm.pause(); this.currentBgm.currentTime = 0; }
         const idx = Math.floor(Math.random() * this.tracks.length);
-        const selectedTrack = this.tracks[idx];
-        
-        this.currentBgm = new Audio(selectedTrack);
+        this.currentBgm = new Audio(this.tracks[idx]);
         this.currentBgm.loop = true;
-        this.currentBgm.volume = 0.5; // BGM 볼륨 (잡음과 밸런스 맞춤)
-        
-        // 브라우저 정책상 클릭 없이는 재생 실패할 수 있음 (에러 로그만 남기고 넘어감)
-        this.currentBgm.play().catch(e => console.log("Waiting for interaction to play BGM..."));
-        console.log(`🎵 Radio Tuned to: ${selectedTrack}`);
+        this.currentBgm.volume = 0.5; 
+        this.currentBgm.play().catch(e => {});
     },
+    stopBGM: function() { if (this.currentBgm) this.currentBgm.pause(); },
 
-    stopBGM: function() {
-        if (this.currentBgm) {
-            this.currentBgm.pause();
-        }
-    },
-
-    // 효과음: 부드러운 사인파
     playBassExplosion: function(chainCount = 0) {
         if (!this.ctx || this.isMuted) return;
         const now = this.ctx.currentTime;
         const osc = this.ctx.createOscillator();
         const gain = this.ctx.createGain();
-        
-        osc.type = 'sine'; 
-        const baseFreq = 110.0; 
-        const freq = baseFreq * Math.pow(1.05946, chainCount % 12); 
+        osc.type = 'sine'; const freq = 110.0 * Math.pow(1.05946, chainCount % 12); 
         osc.frequency.setValueAtTime(freq, now);
-        
         gain.gain.setValueAtTime(0, now);
         gain.gain.linearRampToValueAtTime(0.8, now + 0.05); 
         gain.gain.exponentialRampToValueAtTime(0.001, now + 1.2); 
-        
-        osc.connect(gain); 
-        gain.connect(this.masterGain);
-        
-        osc.start(now); 
-        osc.stop(now + 1.2);
+        osc.connect(gain); gain.connect(this.masterGain);
+        osc.start(now); osc.stop(now + 1.2);
     },
-
     playItemGet: function(type) {
         if (!this.ctx || this.isMuted) return;
         const now = this.ctx.currentTime;
         const osc = this.ctx.createOscillator();
         const gain = this.ctx.createGain();
-        
-        if (type === 'num') {
-            osc.type = 'sine'; osc.frequency.setValueAtTime(880, now); 
-            gain.gain.setValueAtTime(0.2, now); gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
-        } else {
-            osc.type = 'square'; osc.frequency.setValueAtTime(440, now); osc.frequency.linearRampToValueAtTime(880, now + 0.05);
-            gain.gain.setValueAtTime(0.1, now); gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
-        }
-        
-        osc.connect(gain); 
-        gain.connect(this.masterGain);
+        if (type === 'num') { osc.type = 'sine'; osc.frequency.setValueAtTime(880, now); gain.gain.setValueAtTime(0.2, now); gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1); } 
+        else { osc.type = 'square'; osc.frequency.setValueAtTime(440, now); osc.frequency.linearRampToValueAtTime(880, now + 0.05); gain.gain.setValueAtTime(0.1, now); gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1); }
+        osc.connect(gain); gain.connect(this.masterGain);
         osc.start(now); osc.stop(now + 0.1);
     }
 };
 
-// --- STAR BACKGROUND SYSTEM ---
+// --- VISUALS ---
 const stars = [];
-const STAR_COUNT = 100;
-function initStars() {
-    for (let i = 0; i < STAR_COUNT; i++) {
-        stars.push({
-            x: Math.random() * GAME_WIDTH, y: Math.random() * GAME_HEIGHT,
-            size: Math.random() * 1.5 + 0.5, speed: Math.random() * 50 + 20, alpha: Math.random() * 0.5 + 0.3
-        });
-    }
-}
-function updateStars(dt) {
-    stars.forEach(star => {
-        star.y += star.speed * dt;
-        if (star.y > GAME_HEIGHT) { star.y = 0; star.x = Math.random() * GAME_WIDTH; }
-    });
-}
-function drawStars() {
-    ctx.save();
-    stars.forEach(star => {
-        ctx.fillStyle = `rgba(255, 255, 255, ${star.alpha})`;
-        ctx.beginPath(); ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2); ctx.fill();
-    });
-    ctx.restore();
-}
+function initStars() { for (let i = 0; i < 100; i++) stars.push({ x: Math.random() * GAME_WIDTH, y: Math.random() * GAME_HEIGHT, size: Math.random() * 1.5 + 0.5, speed: Math.random() * 50 + 20, alpha: Math.random() * 0.5 + 0.3 }); }
+function updateStars(dt) { stars.forEach(s => { s.y += s.speed * dt; if (s.y > GAME_HEIGHT) { s.y = 0; s.x = Math.random() * GAME_WIDTH; } }); }
+function drawStars() { ctx.save(); stars.forEach(s => { ctx.fillStyle = `rgba(255, 255, 255, ${s.alpha})`; ctx.beginPath(); ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2); ctx.fill(); }); ctx.restore(); }
 initStars();
 
 // --- SERVER LOGIC ---
 let globalScores = [];
-let isFetching = false;
-function fetchGlobalScores() {
-    isFetching = true;
-    fetch(SERVER_URL).then(r => r.json()).then(d => { if(Array.isArray(d)) globalScores = d; isFetching = false; }).catch(e => { isFetching = false; });
-}
-function sendGlobalScore(name, finalScore) {
-    gameState = 'UPLOADING'; highscoreInput.classList.add('hidden');
-    fetch(SERVER_URL, { method: 'POST', body: JSON.stringify({ name: name, score: finalScore }) })
-    .then(r => r.json()).then(() => { fetchGlobalScores(); setTimeout(showLeaderboard, 1000); }).catch(() => { setTimeout(showLeaderboard, 1000); });
-}
-function checkIsHighScore(finalScore) {
-    if (globalScores.length < 20) return true;
-    return finalScore > globalScores[globalScores.length - 1].score;
-}
+function fetchGlobalScores() { fetch(SERVER_URL).then(r => r.json()).then(d => { if(Array.isArray(d)) globalScores = d; }).catch(e => {}); }
+function sendGlobalScore(name, finalScore) { gameState = 'UPLOADING'; highscoreInput.classList.add('hidden'); fetch(SERVER_URL, { method: 'POST', body: JSON.stringify({ name: name, score: finalScore }) }).then(r => r.json()).then(() => { fetchGlobalScores(); setTimeout(showLeaderboard, 1000); }).catch(() => { setTimeout(showLeaderboard, 1000); }); }
+function checkIsHighScore(finalScore) { if (globalScores.length < 20) return true; return finalScore > globalScores[globalScores.length - 1].score; }
 fetchGlobalScores();
 
 // --- GAME OBJECTS ---
@@ -272,17 +183,12 @@ function resize() {
 window.addEventListener('resize', resize); resize();
 function getGameCoordinates(clientX, clientY) { return { x: (clientX - canvasOffsetX) / scale, y: (clientY - canvasOffsetY) / scale }; }
 
-// UI Handlers
 messageBox.addEventListener('mousedown', handleUiClick);
 messageBox.addEventListener('touchstart', (e) => { e.preventDefault(); handleUiClick(); });
-function handleUiClick() {
-    if (gameState === 'START' || gameState === 'LEADERBOARD') { startGame(); }
-    else if (gameState === 'TRANSITION') { resetStage(); }
-}
+function handleUiClick() { if (gameState === 'START' || gameState === 'LEADERBOARD') startGame(); else if (gameState === 'TRANSITION') resetStage(); }
 submitBtn.addEventListener('click', () => { const name = initialsField.value.toUpperCase().substring(0, 3) || "UNK"; sendGlobalScore(name, score); });
 initialsField.addEventListener('keypress', (e) => { if (e.key === 'Enter') submitBtn.click(); });
 
-// --- LEVEL INTERPRETER ---
 function generateLevel(levelNum) {
     let spawnList = [];
     if (typeof STAGE_DATA === 'undefined') return [];
@@ -290,61 +196,47 @@ function generateLevel(levelNum) {
     if (!stageConfig) return []; 
     if (stageConfig.spawnList) {
         stageConfig.spawnList.forEach(unit => {
-            const pixelX = (unit.col - 1) * COL_WIDTH + (COL_WIDTH / 2);
-            const spawnTime = (unit.row - 1) * ROW_TIME + START_DELAY;
-            spawnList.push({ time: spawnTime, x: pixelX, hp: unit.hp, isBoss: unit.isBoss || false });
+            const px = (unit.col - 1) * COL_WIDTH + (COL_WIDTH / 2);
+            const t = (unit.row - 1) * ROW_TIME + START_DELAY;
+            spawnList.push({ time: t, x: px, hp: unit.hp, isBoss: unit.isBoss || false });
         });
     }
     spawnList.sort((a, b) => a.time - b.time);
     return spawnList;
 }
 
-// --- GAME FLOW ---
-function startGame() { 
-    SoundManager.init(); 
-    score = 0; currentLevel = 1; lives = 3; 
-    resetStage(); // 여기서 음악 재생됨
-}
-
+function startGame() { SoundManager.init(); score = 0; currentLevel = 1; lives = 3; resetStage(); }
 function resetStage() {
-    gameState = 'PLAY';
-    messageBox.classList.add('hidden'); highscoreInput.classList.add('hidden'); document.body.style.cursor = 'none';
+    gameState = 'PLAY'; messageBox.classList.add('hidden'); highscoreInput.classList.add('hidden'); document.body.style.cursor='none';
     elapsedTime = 0; stageClearTimer = 0; crashTimer = 0;
+    
+    // [LOGAN: Reset Timer]
+    pickupTimer = 0; 
+
     player.expr = ""; bullets = []; enemies = []; items = []; particles = [];
     enemySpawnData = generateLevel(currentLevel);
-    
-    // [AUDIO CHANGE] 스테이지 시작/재시작 시 새로운 BGM 셔플
     SoundManager.playRandomBGM();
-
-    lastTime = performance.now();
-    isDragging = true; 
-    requestAnimationFrame(gameLoop);
+    lastTime = performance.now(); isDragging = true; requestAnimationFrame(gameLoop);
 }
 
-function showLevelClearScreen() {
-    gameState = 'TRANSITION'; currentLevel++; messageBox.classList.remove('hidden');
-    mainTitle.innerText = "STAGE CLEAR!"; subText.innerText = `[ CLICK FOR LEVEL ${currentLevel} ]`; subText.style.color = '#fff';
+function showLevelClearScreen() { 
+    gameState = 'TRANSITION'; 
+    isDragging = false; // [LOGAN ADD] 조준 강제 해제
+    document.body.style.cursor = 'default'; // [LOGAN ADD] 커서 다시 보이기
+    currentLevel++; 
+    messageBox.classList.remove('hidden'); 
+    mainTitle.innerText = "STAGE CLEAR!"; 
+    subText.innerText = `[ CLICK FOR LEVEL ${currentLevel} ]`; 
+    subText.style.color = '#fff'; 
 }
-function triggerStageFail() {
-    gameState = 'FAIL'; messageBox.classList.remove('hidden');
-    mainTitle.innerText = "DEFENSE FAILED!"; subText.innerText = "RESTARTING STAGE..."; subText.style.color = '#f50';
-    SoundManager.stopBGM(); // 실패 시 음악 끔
-    setTimeout(() => { resetStage(); }, 2000);
-}
-function handlePlayerCrash() {
-    gameState = 'CRASHED'; crashTimer = 0; isDragging = false; document.body.style.cursor = 'default';
-    spawnExplosion(player.x, player.y - 20, 'critical', "SYSTEM FAILURE", 0, 1);
-}
-function gameOver() {
-    document.body.style.cursor = 'default'; fetchGlobalScores();
-    if (checkIsHighScore(score)) { gameState = 'INPUT'; messageBox.classList.add('hidden'); highscoreInput.classList.remove('hidden'); initialsField.value = ""; initialsField.focus(); }
-    else { showLeaderboard(); }
-}
-function showLeaderboard() { gameState = 'LEADERBOARD'; messageBox.classList.add('hidden'); highscoreInput.classList.add('hidden'); }
 
-// --- INPUT & UPDATE ---
-window.addEventListener('mousedown', () => { if (gameState === 'LEADERBOARD') startGame(); else if (gameState === 'PLAY') isDragging = true; });
-window.addEventListener('touchstart', (e) => { if (gameState === 'LEADERBOARD') { e.preventDefault(); startGame(); } else if (gameState === 'PLAY') { e.preventDefault(); isDragging = true; } }, { passive: false });
+function triggerStageFail() { gameState = 'FAIL'; messageBox.classList.remove('hidden'); mainTitle.innerText = "DEFENSE FAILED!"; subText.innerText = "RESTARTING STAGE..."; subText.style.color = '#f50'; SoundManager.stopBGM(); setTimeout(() => { resetStage(); }, 2000); }
+function handlePlayerCrash() { gameState = 'CRASHED'; crashTimer = 0; isDragging = false; document.body.style.cursor = 'default'; spawnExplosion(player.x, player.y - 20, 'critical', "SYSTEM FAILURE", 0, 1); }
+function gameOver() { document.body.style.cursor = 'default'; fetchGlobalScores(); if(checkIsHighScore(score)) { gameState = 'INPUT'; messageBox.classList.add('hidden'); highscoreInput.classList.remove('hidden'); initialsField.value = ""; initialsField.focus(); } else { showLeaderboard(); } }
+
+// --- INPUT ---
+window.addEventListener('mousedown', () => { if (gameState === 'PLAY') isDragging = true; });
+window.addEventListener('touchstart', (e) => { if (gameState === 'PLAY') { e.preventDefault(); isDragging = true; } }, { passive: false });
 window.addEventListener('mouseup', () => { if(gameState==='PLAY' && isDragging) { isDragging = false; fireBullet(); }});
 window.addEventListener('touchend', () => { if(gameState==='PLAY' && isDragging) { isDragging = false; fireBullet(); }});
 window.addEventListener('mousemove', e => updatePlayerPos(e.clientX, e.clientY));
@@ -372,11 +264,29 @@ function fireBullet() {
     bullets.push({ x: player.x, y: player.y - 40, text: player.expr, speed: 800 });
     player.expr = "";
 }
-function spawnExplosion(x, y, tier, textValue, damageVal, multiplier) {
-    // [AUDIO] Play SFX
-    let chain = multiplier > 1 ? multiplier : 0;
-    SoundManager.playBassExplosion(chain);
 
+// --- [LOGAN: DEBRIS LOGIC] ---
+function spawnDebris(x, y, hp) {
+    if (hp < 10) return;
+    const digitCount = String(hp).length; 
+    const maxVal = Math.floor(hp * 0.2); 
+    if (maxVal < 1) return;
+
+    for (let i = 0; i < digitCount; i++) {
+        let val = Math.floor(Math.random() * maxVal) + 1;
+        items.push({
+            type: 'num', val: val, x: x, y: y,
+            vx: (Math.random() - 0.5) * 400, // 좌우 퍼짐
+            vy: (Math.random() - 0.5) * 400 - 150, // 위로 솟구침
+            isDebris: true
+        });
+    }
+}
+// -----------------------------
+
+function spawnExplosion(x, y, tier, textValue, damageVal, multiplier) {
+    let chain = multiplier > 1 ? multiplier : 0;
+    SoundManager.playBassExplosion(chain); 
     let finalText = textValue;
     if (textValue !== "SYSTEM FAILURE" && tier === 'critical' && multiplier > 1) { finalText = `x${multiplier}!`; }
     let textColor = (textValue === "SYSTEM FAILURE") ? '#0ff' : ((tier === 'critical') ? '#ff0000' : '#ffffff');
@@ -391,24 +301,70 @@ function spawnExplosion(x, y, tier, textValue, damageVal, multiplier) {
         particles.push({ type:'spark', x, y, vx:Math.cos(ang)*s, vy:Math.sin(ang)*s, size:Math.random()*4+2, color:colors[i%colors.length], life:1.0, decay:1.5 });
     }
     if(tier==='critical' || textValue === "SYSTEM FAILURE") { particles.push({ type:'shockwave', x, y, size:10, maxSize:shockSize, color:colors[0], life:1.0, decay:1.0, damage: damageVal, hitList: [], age: 0, multiplier: multiplier }); } 
-    else if (tier==='medium') { particles.push({ type:'shockwave_visual', x, y, size:10, maxSize:shockSize, color:colors[0], life:1.0, decay:2.0 }); }
 }
 
 function update(dt) {
+    // 1. 배경 별과 파편(이펙트)은 게임 상태와 상관없이 항상 움직여야 함 (프리징 방지)
     updateStars(dt);
+
+    // [LOGAN: Timer Check]
+    if (pickupTimer > 0) pickupTimer -= dt;
+
+    // 파편/이펙트 처리 (모든 상태에서 작동하도록 위로 올림)
+    for (let i = particles.length - 1; i >= 0; i--) {
+        let p = particles[i];
+        p.life -= (p.decay || 1.0) * dt;
+        
+        // 글자(SYSTEM FAILURE 등)도 계속 위로 올라가게 처리
+        if (p.type === 'text') {
+            p.y += p.vy * dt; 
+        }
+        else if (p.type === 'spark') {
+            p.x += p.vx * dt; p.y += p.vy * dt;
+            p.vx *= 0.9; p.vy *= 0.9;
+        }
+        else if (p.type === 'shockwave' || p.type === 'shockwave_visual') {
+            p.size += (p.maxSize - p.size) * 3 * dt;
+            // 충격파 데미지 로직 (PLAY 상태일 때만)
+            if (p.type === 'shockwave' && gameState === 'PLAY') {
+                p.age += dt;
+                if (p.age <= CHAIN_DMG_DURATION) {
+                    for (let j = enemies.length - 1; j >= 0; j--) {
+                        let en = enemies[j]; if (en.y < 0 || en.y > GAME_HEIGHT) continue; if (p.hitList.includes(en)) continue;
+                        let dist = Math.hypot((en.x + en.width/2) - p.x, (en.y + en.height/2) - p.y);
+                        if (dist < p.size - 10) {
+                            let isStrictCrit = (en.hp === p.damage); let actualDmg = Math.min(en.hp, p.damage);
+                            let chainStartHp = en.hp;
+                            score += actualDmg * p.multiplier; en.hp -= p.damage; p.hitList.push(en);
+                            if (en.hp <= 0) {
+                                spawnExplosion(en.x + en.width/2, en.y + en.height/2, isStrictCrit ? 'critical' : 'medium', isStrictCrit ? "CHAIN!" : p.damage, p.damage, p.multiplier + 1);
+                                if (isStrictCrit) { spawnDebris(en.x + en.width/2, en.y + en.height/2, chainStartHp); }
+                                enemies.splice(j, 1);
+                            } else { spawnExplosion(en.x + en.width/2, en.y + en.height/2, 'small', p.damage, 1); }
+                        }
+                    }
+                }
+            }
+        }
+        if (p.life <= 0) particles.splice(i, 1);
+    }
+
+    // 2. 크래시 상태 로직 (타이머만 체크)
     if (gameState === 'CRASHED') {
         crashTimer += dt;
-        for (let i = particles.length - 1; i >= 0; i--) {
-            let p = particles[i]; p.life -= (p.decay || 1.0) * dt;
-            if (p.type === 'text') p.y += p.vy * dt;
-            else if (p.type === 'spark') { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.9; p.vy *= 0.9; }
-            else if (p.type === 'shockwave') { p.size += (p.maxSize - p.size) * 5 * dt; }
-            if (p.life <= 0) particles.splice(i, 1);
+        if (crashTimer > 1.5) { 
+            lives--; 
+            if (lives <= 0) gameOver(); 
+            else triggerStageFail(); 
         }
-        if (crashTimer > 1.5) { lives--; if (lives <= 0) gameOver(); else triggerStageFail(); }
-        return; 
+        return; // 크래시 중에는 아래 게임 로직 실행 안 함
     }
+
+    // 3. 게임 플레이 중이 아닐 때는 여기서 중단 (FAIL, TRANSITION 등)
     if (gameState !== 'PLAY') return;
+
+    // --- 아래는 PLAY 상태일 때만 돌아가는 게임 로직 ---
+
     elapsedTime += dt * 1000;
     if (enemySpawnData.length === 0 && enemies.length === 0) { stageClearTimer += dt; if (stageClearTimer > 3.0) showLevelClearScreen(); }
 
@@ -426,17 +382,35 @@ function update(dt) {
         if (lastSpawnNum > SPAWN_RATE_NUM) { items.push({ type:'num', val:numCounter, x:Math.random()*(GAME_WIDTH-60)+30, y:-40, speed:180 + Math.random()*60 }); numCounter=(numCounter%10)+1; lastSpawnNum = 0; }
         if (lastSpawnSym > SPAWN_RATE_SYM) { items.push({ type:'sym', val:['+','+','-','×','÷'][Math.floor(Math.random()*5)], x:Math.random()*(GAME_WIDTH-60)+30, y:-40, speed:120 + Math.random()*60 }); lastSpawnSym = 0; }
     }
+    
+    // [LOGAN: Item & Debris Logic]
     for (let i = items.length - 1; i >= 0; i--) {
-        let it = items[i]; it.y += it.speed * dt;
+        let it = items[i]; 
+        
+        // Debris Physics
+        if (it.isDebris) {
+            it.x += it.vx * dt;
+            it.y += it.vy * dt;
+            it.vy += 800 * dt; // Gravity
+        } else {
+            it.y += it.speed * dt;
+        }
+
         if (isDragging && Math.abs(it.x - player.x) < 40 && Math.abs(it.y - player.y) < 40) {
-            if (!(player.expr === "" && it.type === 'sym')) { 
-                updateExpression(it.val); 
-                SoundManager.playItemGet(it.type); // [AUDIO] SFX
-                items.splice(i, 1); continue; 
+            // [LOGAN: 0.2s Rule Check]
+            if (pickupTimer <= 0) { 
+                if (!(player.expr === "" && it.type === 'sym')) { 
+                    updateExpression(it.val); 
+                    SoundManager.playItemGet(it.type); 
+                    items.splice(i, 1); 
+                    pickupTimer = PICKUP_COOLDOWN; // Set Cooldown
+                    continue; 
+                }
             }
         }
         if (it.y > GAME_HEIGHT) items.splice(i, 1);
     }
+
     for (let i = enemies.length - 1; i >= 0; i--) {
         let en = enemies[i]; en.y += en.speed * dt;
         if (Math.abs((en.x + en.width/2) - player.x) < (en.width/2 + 20) && Math.abs((en.y + en.height/2) - (player.y - 20)) < (en.height/2 + 20)) { handlePlayerCrash(); return; }
@@ -452,41 +426,23 @@ function update(dt) {
                 let isCrit = (en.hp === dmg);
                 let tier = (en.hp - dmg <= 0) ? (isCrit ? 'critical' : 'medium') : 'small';
                 let actualDmg = Math.min(en.hp, dmg);
+                let startHp = en.hp; // Store HP before hit
+                
                 score += actualDmg;
                 spawnExplosion(en.x + en.width/2, en.y + en.height/2, tier, isCrit ? "CRITICAL!" : dmg, dmg, 2);
-                en.hp -= dmg; if (en.hp <= 0) enemies.splice(j, 1);
+                
+                en.hp -= dmg; 
+                if (en.hp <= 0) {
+                    if (isCrit) { spawnDebris(en.x + en.width/2, en.y + en.height/2, startHp); }
+                    enemies.splice(j, 1);
+                }
                 bullets.splice(i, 1); break;
             }
         }
         if (b.y < -100) bullets.splice(i, 1);
     }
-    for (let i = particles.length - 1; i >= 0; i--) {
-        let p = particles[i]; p.life -= (p.decay || 1.0) * dt; p.y += ENEMY_BASE_SPEED * dt;
-        if (p.type === 'text') p.y += p.vy * dt;
-        else if (p.type === 'spark') { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.9; p.vy *= 0.9; }
-        else if (p.type === 'shockwave' || p.type === 'shockwave_visual') {
-            p.size += (p.maxSize - p.size) * 3 * dt;
-            if (p.type === 'shockwave') {
-                p.age += dt;
-                if (p.age <= CHAIN_DMG_DURATION) {
-                    for (let j = enemies.length - 1; j >= 0; j--) {
-                        let en = enemies[j]; if (en.y < 0 || en.y > GAME_HEIGHT) continue; if (p.hitList.includes(en)) continue;
-                        let dist = Math.hypot((en.x + en.width/2) - p.x, (en.y + en.height/2) - p.y);
-                        if (dist < p.size - 10) {
-                            let isStrictCrit = (en.hp === p.damage); let actualDmg = Math.min(en.hp, p.damage);
-                            score += actualDmg * p.multiplier; en.hp -= p.damage; p.hitList.push(en);
-                            if (en.hp <= 0) {
-                                spawnExplosion(en.x + en.width/2, en.y + en.height/2, isStrictCrit ? 'critical' : 'medium', isStrictCrit ? "CHAIN!" : p.damage, p.damage, p.multiplier + 1);
-                                enemies.splice(j, 1);
-                            } else { spawnExplosion(en.x + en.width/2, en.y + en.height/2, 'small', p.damage, 1); }
-                        }
-                    }
-                }
-            }
-        }
-        if (p.life <= 0) particles.splice(i, 1);
-    }
 }
+
 function draw() {
     ctx.fillStyle = '#000'; ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
     drawStars();
