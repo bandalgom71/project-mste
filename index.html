@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="robots" content="noindex, nofollow">
-    <title>MSTE v8.5 - Logic Patch</title>
+    <title>MSTE v8.2 - 7 Grid System (Safe Rollback)</title>
     
     <script src="stages.js"></script>
 
@@ -42,11 +42,10 @@
 
 <script>
 /**
- * [LOGAN'S PATCH v8.5]
- * - Base: v7.0 Stable
- * - ADDED: 0.2s Pickup Cooldown Rule.
- * - ADDED: Debris (Shard) System with Gravity.
- * - NOTE: Graphics are kept as default (Rectangles).
+ * [LOGAN'S PATCH v8.2 - Step 1 Safe Rollback]
+ * - Base: User's stable v8.1 code.
+ * - Feature: 7 Grid System applied safely.
+ * - Fix: isFetching variable explicitly declared to prevent ReferenceError.
  */
 
 const SERVER_URL = "https://script.google.com/macros/s/AKfycbyuDE-Zr7x7MdQu-Zj_hO3bl844y4YH7MguctqNkG5nzmGfdF8GtFNTMupG0Tfdm9m-/exec";
@@ -70,10 +69,8 @@ let lastTime = 0, elapsedTime = 0;
 let stageClearTimer = 0;
 let crashTimer = 0; 
 
-// [LOGAN: CONFIG - 0.2s Rule Added]
 let pickupTimer = 0; 
 const PICKUP_COOLDOWN = 0.2; 
-// ---------------------------------
 
 const TIME_SCALE = 0.5; 
 const ENEMY_BASE_SPEED = 100;
@@ -81,16 +78,26 @@ const CHAIN_DMG_DURATION = 0.65;
 const SPAWN_RATE_NUM = 750; 
 const SPAWN_RATE_SYM = 1500; 
 const COL_WIDTH = 60;
-const ROW_TIME = 450; 
-const START_DELAY = 2000; 
+const ROW_TIME = 1000; 
+const START_DELAY = 500; 
 const ENEMY_WIDTH = 60;
 const ENEMY_HEIGHT = 45;
 
 let score = 0;
 let currentLevel = 1;
 let lives = 3;
+let currentEnemySpeed = ENEMY_BASE_SPEED;
+let currentSymbols = ['+', '+', '-', '×', '÷']; 
+let currentNumbers = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+let activePrint = null; // 텍스트와 남은 시간을 담을 객체
+let activeItems = {
+    easyBusy: 0,
+    penetration: 0,
+    timeStop: 0,
+    heavyRotation: 0
+};
 
-// --- AUDIO SYSTEM (No Changes) ---
+// --- [AUDIO SYSTEM] ---
 const SoundManager = {
     ctx: null, currentBgm: null, staticNode: null, staticGain: null, masterGain: null, isMuted: false,
     tracks: ['test_bgm_01.mp3', 'test_bgm_02.mp3', 'test_bgm_03.mp3', 'test_bgm_04.mp3'],
@@ -123,16 +130,26 @@ const SoundManager = {
         this.currentBgm = new Audio(this.tracks[idx]);
         this.currentBgm.loop = true;
         this.currentBgm.volume = 0.5; 
-        this.currentBgm.play().catch(e => {});
+        this.currentBgm.play().catch(e => console.log("BGM wait"));
     },
     stopBGM: function() { if (this.currentBgm) this.currentBgm.pause(); },
-
+	
+	playSpecificBGM: function(filename) {
+        if (this.currentBgm) { this.currentBgm.pause(); this.currentBgm.currentTime = 0; }
+        this.currentBgm = new Audio(filename);
+        this.currentBgm.loop = true;
+        this.currentBgm.volume = 0.5; 
+        this.currentBgm.play().catch(e => console.log("BGM wait"));
+    },
+	
     playBassExplosion: function(chainCount = 0) {
         if (!this.ctx || this.isMuted) return;
         const now = this.ctx.currentTime;
         const osc = this.ctx.createOscillator();
         const gain = this.ctx.createGain();
-        osc.type = 'sine'; const freq = 110.0 * Math.pow(1.05946, chainCount % 12); 
+        osc.type = 'sine'; 
+        const baseFreq = 110.0; 
+        const freq = baseFreq * Math.pow(1.05946, chainCount % 12); 
         osc.frequency.setValueAtTime(freq, now);
         gain.gain.setValueAtTime(0, now);
         gain.gain.linearRampToValueAtTime(0.8, now + 0.05); 
@@ -155,13 +172,23 @@ const SoundManager = {
 // --- VISUALS ---
 const stars = [];
 function initStars() { for (let i = 0; i < 100; i++) stars.push({ x: Math.random() * GAME_WIDTH, y: Math.random() * GAME_HEIGHT, size: Math.random() * 1.5 + 0.5, speed: Math.random() * 50 + 20, alpha: Math.random() * 0.5 + 0.3 }); }
-function updateStars(dt) { stars.forEach(s => { s.y += s.speed * dt; if (s.y > GAME_HEIGHT) { s.y = 0; s.x = Math.random() * GAME_WIDTH; } }); }
+function updateStars(dt) { 
+    // ▼▼▼ 함수가 시작되자마자 타임스톱인지 검사하고, 맞으면 여기서 즉시 함수 종료! ▼▼▼
+    if (activeItems.timeStop > 0) return; 
+
+    // (타임스톱이 아닐 때만 아래 코드가 실행되어 별이 움직이네)
+    stars.forEach(s => { 
+        s.y += s.speed * dt; 
+        if (s.y > GAME_HEIGHT) { s.y = 0; s.x = Math.random() * GAME_WIDTH; } 
+    }); 
+}
 function drawStars() { ctx.save(); stars.forEach(s => { ctx.fillStyle = `rgba(255, 255, 255, ${s.alpha})`; ctx.beginPath(); ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2); ctx.fill(); }); ctx.restore(); }
 initStars();
 
 // --- SERVER LOGIC ---
 let globalScores = [];
-function fetchGlobalScores() { fetch(SERVER_URL).then(r => r.json()).then(d => { if(Array.isArray(d)) globalScores = d; }).catch(e => {}); }
+let isFetching = false; // [로건의 안전장치] 혹시 모를 Reference Error 방지용
+function fetchGlobalScores() { isFetching = true; fetch(SERVER_URL).then(r => r.json()).then(d => { if(Array.isArray(d)) globalScores = d; isFetching = false; }).catch(e => { isFetching = false; }); }
 function sendGlobalScore(name, finalScore) { gameState = 'UPLOADING'; highscoreInput.classList.add('hidden'); fetch(SERVER_URL, { method: 'POST', body: JSON.stringify({ name: name, score: finalScore }) }).then(r => r.json()).then(() => { fetchGlobalScores(); setTimeout(showLeaderboard, 1000); }).catch(() => { setTimeout(showLeaderboard, 1000); }); }
 function checkIsHighScore(finalScore) { if (globalScores.length < 20) return true; return finalScore > globalScores[globalScores.length - 1].score; }
 fetchGlobalScores();
@@ -183,60 +210,76 @@ function resize() {
 window.addEventListener('resize', resize); resize();
 function getGameCoordinates(clientX, clientY) { return { x: (clientX - canvasOffsetX) / scale, y: (clientY - canvasOffsetY) / scale }; }
 
+// UI Handlers
 messageBox.addEventListener('mousedown', handleUiClick);
 messageBox.addEventListener('touchstart', (e) => { e.preventDefault(); handleUiClick(); });
 function handleUiClick() { if (gameState === 'START' || gameState === 'LEADERBOARD') startGame(); else if (gameState === 'TRANSITION') resetStage(); }
 submitBtn.addEventListener('click', () => { const name = initialsField.value.toUpperCase().substring(0, 3) || "UNK"; sendGlobalScore(name, score); });
 initialsField.addEventListener('keypress', (e) => { if (e.key === 'Enter') submitBtn.click(); });
 
+// --- LOGIC ---
 function generateLevel(levelNum) {
     let spawnList = [];
     if (typeof STAGE_DATA === 'undefined') return [];
     const stageConfig = STAGE_DATA[levelNum - 1];
     if (!stageConfig) return []; 
+    
     if (stageConfig.spawnList) {
         stageConfig.spawnList.forEach(unit => {
-            const px = (unit.col - 1) * COL_WIDTH + (COL_WIDTH / 2);
-            const t = (unit.row - 1) * ROW_TIME + START_DELAY;
-            spawnList.push({ time: t, x: px, hp: unit.hp, isBoss: unit.isBoss || false });
+            const t = unit.row * ROW_TIME + START_DELAY;
+            
+            // 1순위: 'type'이 있는 명령어(ITEM 등)를 먼저 체크!
+            if (unit.type) {
+                spawnList.push({ 
+                    time: t, 
+                    type: unit.type, 
+                    val: unit.val, 
+                    text: unit.text, 
+                    duration: unit.duration,
+                    col: unit.col // 아이템 위치를 위해 col도 같이 저장
+                });
+            } 
+            // 2순위: type이 없을 때만 '적'으로 생성
+            else if (unit.col) {
+                const cellWidth = GAME_WIDTH / 7;
+                const px = (unit.col - 0.5) * cellWidth;
+                spawnList.push({ time: t, x: px, hp: unit.hp, isBoss: unit.isBoss || false });
+            }
         });
     }
-    spawnList.sort((a, b) => a.time - b.time);
+    
+	spawnList.sort((a, b) => {
+        if (a.time !== b.time) return a.time - b.time;
+        // [로건의 팁] 같은 시간(Row)일 경우, 이벤트(type)가 배열의 뒤로 가게 하여
+        // 역순 루프(i--)에서 적보다 먼저 실행되도록 우선순위를 조작한다!
+        if (a.type && !b.type) return 1;
+        if (!a.type && b.type) return -1;
+        return 0;
+    });
     return spawnList;
 }
 
 function startGame() { SoundManager.init(); score = 0; currentLevel = 1; lives = 3; resetStage(); }
 function resetStage() {
     gameState = 'PLAY'; messageBox.classList.add('hidden'); highscoreInput.classList.add('hidden'); document.body.style.cursor='none';
-    elapsedTime = 0; stageClearTimer = 0; crashTimer = 0;
-    
-    // [LOGAN: Reset Timer]
-    pickupTimer = 0; 
-
+    elapsedTime = 0; stageClearTimer = 0; crashTimer = 0; pickupTimer = 0;
     player.expr = ""; bullets = []; enemies = []; items = []; particles = [];
+	currentEnemySpeed = ENEMY_BASE_SPEED;
+    currentSymbols = [];
+    currentNumbers = [];
+    activePrint = null;
     enemySpawnData = generateLevel(currentLevel);
-    SoundManager.playRandomBGM();
     lastTime = performance.now(); isDragging = true; requestAnimationFrame(gameLoop);
 }
-
-function showLevelClearScreen() { 
-    gameState = 'TRANSITION'; 
-    isDragging = false; // [LOGAN ADD] 조준 강제 해제
-    document.body.style.cursor = 'default'; // [LOGAN ADD] 커서 다시 보이기
-    currentLevel++; 
-    messageBox.classList.remove('hidden'); 
-    mainTitle.innerText = "STAGE CLEAR!"; 
-    subText.innerText = `[ CLICK FOR LEVEL ${currentLevel} ]`; 
-    subText.style.color = '#fff'; 
-}
-
+function showLevelClearScreen() { gameState = 'TRANSITION'; currentLevel++; messageBox.classList.remove('hidden'); mainTitle.innerText = "STAGE CLEAR!"; subText.innerText = `[ CLICK FOR LEVEL ${currentLevel} ]`; subText.style.color = '#fff'; }
 function triggerStageFail() { gameState = 'FAIL'; messageBox.classList.remove('hidden'); mainTitle.innerText = "DEFENSE FAILED!"; subText.innerText = "RESTARTING STAGE..."; subText.style.color = '#f50'; SoundManager.stopBGM(); setTimeout(() => { resetStage(); }, 2000); }
 function handlePlayerCrash() { gameState = 'CRASHED'; crashTimer = 0; isDragging = false; document.body.style.cursor = 'default'; spawnExplosion(player.x, player.y - 20, 'critical', "SYSTEM FAILURE", 0, 1); }
 function gameOver() { document.body.style.cursor = 'default'; fetchGlobalScores(); if(checkIsHighScore(score)) { gameState = 'INPUT'; messageBox.classList.add('hidden'); highscoreInput.classList.remove('hidden'); initialsField.value = ""; initialsField.focus(); } else { showLeaderboard(); } }
+function showLeaderboard() { gameState = 'LEADERBOARD'; messageBox.classList.add('hidden'); highscoreInput.classList.add('hidden'); }
 
-// --- INPUT ---
-window.addEventListener('mousedown', () => { if (gameState === 'PLAY') isDragging = true; });
-window.addEventListener('touchstart', (e) => { if (gameState === 'PLAY') { e.preventDefault(); isDragging = true; } }, { passive: false });
+// --- INPUT & UPDATE ---
+window.addEventListener('mousedown', () => { if (gameState === 'LEADERBOARD') startGame(); else if (gameState === 'PLAY') isDragging = true; });
+window.addEventListener('touchstart', (e) => { if (gameState === 'LEADERBOARD') { e.preventDefault(); startGame(); } else if (gameState === 'PLAY') { e.preventDefault(); isDragging = true; } }, { passive: false });
 window.addEventListener('mouseup', () => { if(gameState==='PLAY' && isDragging) { isDragging = false; fireBullet(); }});
 window.addEventListener('touchend', () => { if(gameState==='PLAY' && isDragging) { isDragging = false; fireBullet(); }});
 window.addEventListener('mousemove', e => updatePlayerPos(e.clientX, e.clientY));
@@ -257,36 +300,59 @@ function updateExpression(value) {
     else { if (!lastIsNum) tokens[tokens.length - 1] = strVal; else tokens.push(strVal); }
     player.expr = tokens.join('');
 }
+
 function fireBullet() {
     if (player.expr === "") return;
     if (isNaN(player.expr[player.expr.length - 1])) player.expr = player.expr.slice(0, -1);
     if (player.expr === "") return;
-    bullets.push({ x: player.x, y: player.y - 40, text: player.expr, speed: 800 });
-    player.expr = "";
-}
+    
+    let isPiercing = activeItems.penetration > 0;
+    
+    // ▼ 잔해 없이 깔끔하게 조립된 철갑탄 장전기!
+    bullets.push({ 
+        x: player.x, 
+        y: player.y - 40, 
+        text: player.expr, 
+        speed: isPiercing ? 2000 : 800, 
+        isPiercing: isPiercing,       
+        hitList: new Set()            
+    });
 
-// --- [LOGAN: DEBRIS LOGIC] ---
-function spawnDebris(x, y, hp) {
-    if (hp < 10) return;
-    const digitCount = String(hp).length; 
-    const maxVal = Math.floor(hp * 0.2); 
-    if (maxVal < 1) return;
-
-    for (let i = 0; i < digitCount; i++) {
-        let val = Math.floor(Math.random() * maxVal) + 1;
-        items.push({
-            type: 'num', val: val, x: x, y: y,
-            vx: (Math.random() - 0.5) * 400, // 좌우 퍼짐
-            vy: (Math.random() - 0.5) * 400 - 150, // 위로 솟구침
-            isDebris: true
+    // ▼ 파티클 로직 (그대로 유지)
+    for(let i = 0; i < 5; i++) {
+        particles.push({
+            type: 'spark',
+            x: player.x + (Math.random() - 0.5) * 20, 
+            y: player.y - 45,
+            vx: (Math.random() - 0.5) * 100,
+            vy: -200 - Math.random() * 300, 
+            life: 0.7, 
+            size: Math.random() * 3 + 2,
+            color: Math.random() > 0.3 ? '#ffaa00' : '#ffffff' 
         });
     }
+	
+	// 헤비 로테이션 시간이 끝났을 때만 수식을 초기화    
+	if (!(activeItems.heavyRotation > 0)) {
+        player.expr = "";
+    }
 }
-// -----------------------------
+
+function spawnDebris(x, y, hp) {
+    if (hp < 10) return;
+    const count = String(hp).length; 
+    const maxVal = Math.floor(hp * 0.2); 
+    if (maxVal < 1) return;
+    for (let i = 0; i < count; i++) {
+        let val = Math.floor(Math.random() * maxVal) + 1;
+        items.push({ type: 'num', val: val, x: x, y: y, vx: (Math.random() - 0.5) * 400, vy: (Math.random() - 0.5) * 400, isDebris: true });
+    }
+}
 
 function spawnExplosion(x, y, tier, textValue, damageVal, multiplier) {
     let chain = multiplier > 1 ? multiplier : 0;
     SoundManager.playBassExplosion(chain); 
+    
     let finalText = textValue;
     if (textValue !== "SYSTEM FAILURE" && tier === 'critical' && multiplier > 1) { finalText = `x${multiplier}!`; }
     let textColor = (textValue === "SYSTEM FAILURE") ? '#0ff' : ((tier === 'critical') ? '#ff0000' : '#ffffff');
@@ -301,32 +367,303 @@ function spawnExplosion(x, y, tier, textValue, damageVal, multiplier) {
         particles.push({ type:'spark', x, y, vx:Math.cos(ang)*s, vy:Math.sin(ang)*s, size:Math.random()*4+2, color:colors[i%colors.length], life:1.0, decay:1.5 });
     }
     if(tier==='critical' || textValue === "SYSTEM FAILURE") { particles.push({ type:'shockwave', x, y, size:10, maxSize:shockSize, color:colors[0], life:1.0, decay:1.0, damage: damageVal, hitList: [], age: 0, multiplier: multiplier }); } 
+    else if (tier==='medium') { particles.push({ type:'shockwave_visual', x, y, size:10, maxSize:shockSize, color:colors[0], life:1.0, decay:2.0 }); }
 }
 
 function update(dt) {
-    // 1. 배경 별과 파편(이펙트)은 게임 상태와 상관없이 항상 움직여야 함 (프리징 방지)
     updateStars(dt);
-
-    // [LOGAN: Timer Check]
     if (pickupTimer > 0) pickupTimer -= dt;
 
-    // 파편/이펙트 처리 (모든 상태에서 작동하도록 위로 올림)
-    for (let i = particles.length - 1; i >= 0; i--) {
-        let p = particles[i];
-        p.life -= (p.decay || 1.0) * dt;
+	for (let key in activeItems) {
+        if (activeItems[key] > 0) {
+            let prevTime = activeItems[key]; 
+            activeItems[key] -= (dt / TIME_SCALE);
+
+            // [대망의 피날레] Easy-Busy가 막 끝나는 찰나를 포착!
+            if (key === 'easyBusy' && activeItems[key] <= 0 && prevTime > 0) {
+                for (let i = items.length - 1; i >= 0; i--) {
+                    let it = items[i];
+                    if (!it.isDebris) {
+                        if ((it.type === 'num' && it.val === 10) || 
+                            (it.type === 'sym' && (it.val === '+' || it.val === '×'))) {
+                            
+                            // 1. 화려한 스파크 파티 생성! 
+                            for(let k = 0; k < 8; k++) {
+                                particles.push({
+                                    type: 'spark',
+                                    x: it.x,
+                                    y: it.y,
+                                    vx: (Math.random() - 0.5) * 400, 
+                                    vy: (Math.random() - 0.5) * 400,
+                                    life: 1.0,
+                                    size: Math.random() * 4 + 2,
+                                    color: Math.random() > 0.5 ? '#ffff00' : '#ffffff' 
+                                });
+                            }
+                            // 2. 화면에서 깔끔하게 삭제 (파사삭!)
+                            items.splice(i, 1);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (gameState === 'CRASHED') {
+        crashTimer += dt;
+        for (let i = particles.length - 1; i >= 0; i--) {
+            let p = particles[i]; p.life -= (p.decay || 1.0) * dt;
+            if (p.type === 'text') p.y += p.vy * dt;
+            else if (p.type === 'spark') { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.9; p.vy *= 0.9; }
+            else if (p.type === 'shockwave') { p.size += (p.maxSize - p.size) * 5 * dt; }
+            if (p.life <= 0) particles.splice(i, 1);
+        }
+        if (crashTimer > 1.5) { lives--; if (lives <= 0) gameOver(); else triggerStageFail(); }
+        return; 
+    }
+    if (gameState !== 'PLAY') return;
+    if (!(activeItems.timeStop > 0)) {
+        elapsedTime += dt * 1000;
+    }
+    if (enemySpawnData.length === 0 && enemies.length === 0) { stageClearTimer += dt; if (stageClearTimer > 3.0) showLevelClearScreen(); }
+
+	for (let i = enemySpawnData.length - 1; i >= 0; i--) {
+        let data = enemySpawnData[i];
         
-        // 글자(SYSTEM FAILURE 등)도 계속 위로 올라가게 처리
-        if (p.type === 'text') {
-            p.y += p.vy * dt; 
+		if (elapsedTime >= data.time) {
+            
+            if (data.type) {
+                // [STEP 2] 이벤트 디스패처: 명령어를 읽고 전역 변수 업데이트
+                if (data.type === 'BGM') { SoundManager.playSpecificBGM(data.val); }
+                else if (data.type === 'SPEED') { currentEnemySpeed = data.val; }
+                else if (data.type === 'SYMBOL') { currentSymbols = data.val; }
+                else if (data.type === 'NUMBER') { currentNumbers = data.val; }
+                else if (data.type === 'PRINT') { activePrint = { text: data.text, timer: data.duration }; }                                
+                else if (data.type === 'ITEM') {
+                    const colWidth = GAME_WIDTH / 7;
+                    const xPos = (data.col - 1) * colWidth + (colWidth / 2);
+					
+					let width = ENEMY_WIDTH; let height = ENEMY_HEIGHT;
+					enemies.push({ 
+						x: xPos - width/2, 
+						y: -80, 
+						width: width, 
+						height: height, 
+						hp: 1, // 보급선의 체력 (원하는 대로 조절하게)
+						maxHp: 1, 
+						speed: currentEnemySpeed * 0.8, // 일반 적보다 살짝 느리게
+						color: '#ff0', // 황금색 테두리!
+						isBoss: false,
+						dropItem: data.val // ★ 핵심: 죽을 때 떨어뜨릴 아이템 이름을 뱃속에 기억시킴 ★
+					});
+                }
+				
+            } else {
+                // 적 소환 (currentEnemySpeed 적용)
+                let width = data.isBoss ? 150 : ENEMY_WIDTH; let height = data.isBoss ? 100 : ENEMY_HEIGHT;
+                enemies.push({ x: data.x - width/2, y: -80, width, height, hp: data.hp, maxHp: data.hp, speed: currentEnemySpeed, color: data.isBoss?'#f00':'#fff', isBoss: data.isBoss });
+            }
+            
+            enemySpawnData.splice(i, 1);
         }
-        else if (p.type === 'spark') {
-            p.x += p.vx * dt; p.y += p.vy * dt;
-            p.vx *= 0.9; p.vy *= 0.9;
+    }
+
+    // PRINT 타이머 깎기 (update 함수 끝부분, requestAnimationFrame 호출 전쯤에 추가)
+    if (activePrint) {
+        activePrint.timer -= dt;
+        if (activePrint.timer <= 0) activePrint = null;
+    }
+	
+    
+    lastSpawnNum += dt * 1000; lastSpawnSym += dt * 1000;
+    
+	if (enemies.length > 0 || enemySpawnData.length > 0) {
+        
+        // ▼ 1. 숫자 폭우 설정: Easy-Busy일 땐 80(0.08초), 아닐 땐 원래 속도
+        let currentNumRate = (activeItems.easyBusy > 0) ? 200 : SPAWN_RATE_NUM;
+        if (lastSpawnNum > currentNumRate) {
+            // [안전장치] currentNumbers에 데이터가 있을 때만 실행!
+            if (currentNumbers.length > 0) {		
+            // ▼ 삼항 연산자로 Easy-Busy 체크!
+                let randNum = (activeItems.easyBusy > 0) ? 10 : currentNumbers[Math.floor(Math.random() * currentNumbers.length)];
+                items.push({ type:'num', val:randNum, x:Math.random()*(GAME_WIDTH-60)+30, y:-40, speed:180 + Math.random()*60 }); 
+            }
+            lastSpawnNum = 0;
         }
+        
+        // ▼ 2. 기호 폭우 설정: Easy-Busy일 땐 150(0.15초), 아닐 땐 원래 속도
+        let currentSymRate = (activeItems.easyBusy > 0) ? 150 : SPAWN_RATE_SYM;
+        if (lastSpawnSym > currentSymRate) {
+            // [안전장치] currentSymbols에 데이터가 있을 때만 실행!
+            if (currentSymbols.length > 0) {
+                // ▼ 여기서 Easy-Busy 체크! 활성화 중이면 '+', '×'만 들어있는 임시 배열(Pool)을 사용하네.
+                let symPool = (activeItems.easyBusy > 0) ? ['+', '×'] : currentSymbols;
+                
+                // 선택된 배열(symPool)에서 무작위로 하나 추출
+                let randSym = symPool[Math.floor(Math.random() * symPool.length)];
+                
+                items.push({ 
+                    type: 'sym', 
+                    val: randSym, 
+                    x: Math.random() * (GAME_WIDTH - 60) + 30, 
+                    y: -40, 
+                    speed: 120 + Math.random() * 60 
+                }); 
+            }
+            lastSpawnSym = 0; 
+        }
+    }
+    
+    for (let i = items.length - 1; i >= 0; i--) {
+        let it = items[i]; 
+        
+        if (it.isDebris) {
+            it.x += it.vx * dt;
+            it.y += it.vy * dt;
+            it.vy += 200 * dt;
+        } else {
+			let speedBoost = (activeItems.easyBusy > 0) ? 2.5 : 1.0;
+            it.y += (it.speed * speedBoost) * dt;
+        }
+
+        if (isDragging && Math.abs(it.x - player.x) < 40 && Math.abs(it.y - player.y) < 40) {
+            if (pickupTimer <= 0) {
+			
+				if (it.type === 'special') {
+                    if (it.val === 'EASY_BUSY') {
+						activeItems.easyBusy = 5.0; // 파트너의 요청대로 5초로 셋팅!
+						activePrint = { text: "EASY-BUSY: 10, +, × ONLY!", timer: 2.0 };
+						
+						items.forEach(existingItem => {
+							// 화면에 떨어지고 있던 기존 숫자들을 전부 10으로 바꿈
+							if (existingItem.type === 'num' && !existingItem.isDebris) {
+								existingItem.val = 10;
+							} 
+							// 화면에 있던 기존 부호들을 + 또는 ×로 바꿈
+							else if (existingItem.type === 'sym') {
+								existingItem.val = Math.random() < 0.5 ? '+' : '×';
+							}
+						});	
+					}
+					
+					else if (it.val === 'HEAVY_ROTATION') {
+					activeItems.heavyRotation = 5.0; // 5초간 화력 집중!
+					activePrint = { text: "HEAVY ROTATION: LOCK & LOAD!", timer: 2.0 };
+					}
+					
+					else if (it.val === 'TIME_STOP') {
+					activeItems.timeStop = 5.0; // 느긋하게 요리할 수 있는 5초!
+					activePrint = { text: "TIME STOP: FREEZE!", timer: 2.0 };
+					}
+                    
+                    SoundManager.playItemGet('special'); // 뿅! 하는 소리도 잊지 말고
+                    items.splice(i, 1);                  // 박스는 먹었으니 지워줌
+                    continue;                            // 다음 아이템 검사로 넘어감
+                }
+			
+                if (!(player.expr === "" && it.type === 'sym')) { 
+                    updateExpression(it.val); 
+                    SoundManager.playItemGet(it.type); 
+                    items.splice(i, 1);
+                    pickupTimer = PICKUP_COOLDOWN; 
+                    continue; 
+                }
+            }
+        }
+        if (it.y > GAME_HEIGHT) items.splice(i, 1);
+    }
+    
+    for (let i = enemies.length - 1; i >= 0; i--) {
+        let en = enemies[i];
+
+        // ▼ 타임스톱이 아닐 때만 적이 아래로 이동! (시간이 멈추면 속도가 0이 되는 효과)
+        if (!(activeItems.timeStop > 0)) {
+            en.y += en.speed * dt;
+        }
+
+        // ▼ 충돌 판정은 무조건 검사! (얼어붙은 적에게 들이받으면 가차 없이 터지네!)
+        if (Math.abs((en.x + en.width/2) - player.x) < (en.width/2 + 20) && Math.abs((en.y + en.height/2) - (player.y - 20)) < (en.height/2 + 20)) { 
+            handlePlayerCrash(); 
+            return; 
+        }
+        
+        // 화면 밖으로 나갔을 때의 판정
+        if (en.y > GAME_HEIGHT) { 
+            lives--; 
+            if (lives <= 0) { gameOver(); } else { triggerStageFail(); } 
+            return; 
+        }
+    }
+    
+    for (let i = bullets.length - 1; i >= 0; i--) {
+        let b = bullets[i]; 
+        b.y -= b.speed * dt;
+        let bulletDestroyed = false; // [로건의 보너스] 총알이 삭제되었는지 기억하는 안전장치!
+
+        for (let j = enemies.length - 1; j >= 0; j--) {
+            let en = enemies[j];
+            
+            // 1. 총알과 적의 기본 충돌 검사
+            if (b.x > en.x && b.x < en.x + en.width && b.y > en.y && b.y < en.y + en.height) {
+                
+                // ▼▼▼ [NEW 1] 이미 때린 적은 명부(HitList)를 보고 무시! ▼▼▼
+                if (b.isPiercing && b.hitList.has(en)) {
+                    continue; 
+                }
+
+                // ▼▼▼ [NEW 2] 처음 때린 적이라면 명부에 바로 이름(en)을 적음! ▼▼▼
+                if (b.isPiercing) {
+                    b.hitList.add(en);
+                }
+
+                // (--- 이 아래는 기존 데미지 및 이펙트 로직 그대로! ---)
+                let cleanExpr = b.text.replace(/×/g, '*').replace(/÷/g, '/');
+                let dmg = 1; try { dmg = Math.floor(eval(cleanExpr)); } catch(e) {} if (dmg < 1) dmg = 1;
+                let isCrit = (en.hp === dmg);
+                let tier = (en.hp - dmg <= 0) ? (isCrit ? 'critical' : 'medium') : 'small';
+                let actualDmg = Math.min(en.hp, dmg);
+                
+                if (isCrit) {
+                    spawnDebris(en.x + en.width/2, en.y + en.height/2, en.hp);
+                }
+
+                score += actualDmg;
+                spawnExplosion(en.x + en.width/2, en.y + en.height/2, tier, isCrit ? "CRITICAL!" : dmg, dmg, 2);
+                en.hp -= dmg; 
+                if (en.hp <= 0) {
+                    if (en.dropItem) {
+                        items.push({ 
+                            type: 'special', val: en.dropItem, 
+                            x: en.x + en.width / 2, y: en.y + en.height / 2, speed: 150 
+                        });
+                    }                           
+                    enemies.splice(j, 1); 
+                }
+                // (--- 데미지 로직 끝 ---)
+
+                // ▼▼▼ [NEW 3] 관통탄은 파괴되지 않고 뚫고 지나감! ▼▼▼
+                if (!b.isPiercing) {
+                    bullets.splice(i, 1); // 일반 총알만 여기서 터짐
+                    bulletDestroyed = true; // 삭제되었다고 도장 쾅!
+                    break; // 더 이상 다른 적을 검사할 필요 없으니 탈출
+                }
+            }
+        }
+        
+        // ▼▼▼ [NEW 4] 화면 밖으로 나간 총알 삭제 (버그 픽스 포함) ▼▼▼
+        // 이미 적을 때려서 삭제된 총알(bulletDestroyed)을 또 지우려다 에러가 나는 걸 방지!
+        if (!bulletDestroyed && b.y < -100) {
+            bullets.splice(i, 1);
+        }
+    }
+    
+    for (let i = particles.length - 1; i >= 0; i--) {
+        let p = particles[i]; p.life -= (p.decay || 1.0) * dt; p.y += ENEMY_BASE_SPEED * dt;
+        if (p.type === 'text') p.y += p.vy * dt;
+        else if (p.type === 'spark') { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.9; p.vy *= 0.9; }
         else if (p.type === 'shockwave' || p.type === 'shockwave_visual') {
             p.size += (p.maxSize - p.size) * 3 * dt;
-            // 충격파 데미지 로직 (PLAY 상태일 때만)
-            if (p.type === 'shockwave' && gameState === 'PLAY') {
+            if (p.type === 'shockwave') {
                 p.age += dt;
                 if (p.age <= CHAIN_DMG_DURATION) {
                     for (let j = enemies.length - 1; j >= 0; j--) {
@@ -334,11 +671,11 @@ function update(dt) {
                         let dist = Math.hypot((en.x + en.width/2) - p.x, (en.y + en.height/2) - p.y);
                         if (dist < p.size - 10) {
                             let isStrictCrit = (en.hp === p.damage); let actualDmg = Math.min(en.hp, p.damage);
-                            let chainStartHp = en.hp;
                             score += actualDmg * p.multiplier; en.hp -= p.damage; p.hitList.push(en);
                             if (en.hp <= 0) {
+                                if (isStrictCrit) spawnDebris(en.x + en.width/2, en.y + en.height/2, p.damage);
                                 spawnExplosion(en.x + en.width/2, en.y + en.height/2, isStrictCrit ? 'critical' : 'medium', isStrictCrit ? "CHAIN!" : p.damage, p.damage, p.multiplier + 1);
-                                if (isStrictCrit) { spawnDebris(en.x + en.width/2, en.y + en.height/2, chainStartHp); }
+								if (en.dropItem) { items.push({ type: 'special', val: en.dropItem, x: en.x + en.width/2, y: en.y + en.height/2, speed: 150 }); }
                                 enemies.splice(j, 1);
                             } else { spawnExplosion(en.x + en.width/2, en.y + en.height/2, 'small', p.damage, 1); }
                         }
@@ -348,101 +685,7 @@ function update(dt) {
         }
         if (p.life <= 0) particles.splice(i, 1);
     }
-
-    // 2. 크래시 상태 로직 (타이머만 체크)
-    if (gameState === 'CRASHED') {
-        crashTimer += dt;
-        if (crashTimer > 1.5) { 
-            lives--; 
-            if (lives <= 0) gameOver(); 
-            else triggerStageFail(); 
-        }
-        return; // 크래시 중에는 아래 게임 로직 실행 안 함
-    }
-
-    // 3. 게임 플레이 중이 아닐 때는 여기서 중단 (FAIL, TRANSITION 등)
-    if (gameState !== 'PLAY') return;
-
-    // --- 아래는 PLAY 상태일 때만 돌아가는 게임 로직 ---
-
-    elapsedTime += dt * 1000;
-    if (enemySpawnData.length === 0 && enemies.length === 0) { stageClearTimer += dt; if (stageClearTimer > 3.0) showLevelClearScreen(); }
-
-    for (let i = enemySpawnData.length - 1; i >= 0; i--) {
-        let data = enemySpawnData[i];
-        if (elapsedTime >= data.time) {
-            let width = data.isBoss ? 150 : ENEMY_WIDTH; let height = data.isBoss ? 100 : ENEMY_HEIGHT;
-            let speed = data.isBoss ? ENEMY_BASE_SPEED * 0.3 : ENEMY_BASE_SPEED;
-            enemies.push({ x: data.x - width/2, y: -80, width, height, hp: data.hp, maxHp: data.hp, speed, color: data.isBoss?'#f00':'#fff', isBoss: data.isBoss });
-            enemySpawnData.splice(i, 1);
-        }
-    }
-    lastSpawnNum += dt * 1000; lastSpawnSym += dt * 1000;
-    if (enemies.length > 0 || enemySpawnData.length > 0) {
-        if (lastSpawnNum > SPAWN_RATE_NUM) { items.push({ type:'num', val:numCounter, x:Math.random()*(GAME_WIDTH-60)+30, y:-40, speed:180 + Math.random()*60 }); numCounter=(numCounter%10)+1; lastSpawnNum = 0; }
-        if (lastSpawnSym > SPAWN_RATE_SYM) { items.push({ type:'sym', val:['+','+','-','×','÷'][Math.floor(Math.random()*5)], x:Math.random()*(GAME_WIDTH-60)+30, y:-40, speed:120 + Math.random()*60 }); lastSpawnSym = 0; }
-    }
-    
-    // [LOGAN: Item & Debris Logic]
-    for (let i = items.length - 1; i >= 0; i--) {
-        let it = items[i]; 
-        
-        // Debris Physics
-        if (it.isDebris) {
-            it.x += it.vx * dt;
-            it.y += it.vy * dt;
-            it.vy += 800 * dt; // Gravity
-        } else {
-            it.y += it.speed * dt;
-        }
-
-        if (isDragging && Math.abs(it.x - player.x) < 40 && Math.abs(it.y - player.y) < 40) {
-            // [LOGAN: 0.2s Rule Check]
-            if (pickupTimer <= 0) { 
-                if (!(player.expr === "" && it.type === 'sym')) { 
-                    updateExpression(it.val); 
-                    SoundManager.playItemGet(it.type); 
-                    items.splice(i, 1); 
-                    pickupTimer = PICKUP_COOLDOWN; // Set Cooldown
-                    continue; 
-                }
-            }
-        }
-        if (it.y > GAME_HEIGHT) items.splice(i, 1);
-    }
-
-    for (let i = enemies.length - 1; i >= 0; i--) {
-        let en = enemies[i]; en.y += en.speed * dt;
-        if (Math.abs((en.x + en.width/2) - player.x) < (en.width/2 + 20) && Math.abs((en.y + en.height/2) - (player.y - 20)) < (en.height/2 + 20)) { handlePlayerCrash(); return; }
-        if (en.y > GAME_HEIGHT) { lives--; if (lives <= 0) { gameOver(); } else { triggerStageFail(); } return; }
-    }
-    for (let i = bullets.length - 1; i >= 0; i--) {
-        let b = bullets[i]; b.y -= b.speed * dt;
-        for (let j = enemies.length - 1; j >= 0; j--) {
-            let en = enemies[j];
-            if (b.x > en.x && b.x < en.x + en.width && b.y > en.y && b.y < en.y + en.height) {
-                let cleanExpr = b.text.replace(/×/g, '*').replace(/÷/g, '/');
-                let dmg = 1; try { dmg = Math.floor(eval(cleanExpr)); } catch(e) {} if (dmg < 1) dmg = 1;
-                let isCrit = (en.hp === dmg);
-                let tier = (en.hp - dmg <= 0) ? (isCrit ? 'critical' : 'medium') : 'small';
-                let actualDmg = Math.min(en.hp, dmg);
-                let startHp = en.hp; // Store HP before hit
-                
-                score += actualDmg;
-                spawnExplosion(en.x + en.width/2, en.y + en.height/2, tier, isCrit ? "CRITICAL!" : dmg, dmg, 2);
-                
-                en.hp -= dmg; 
-                if (en.hp <= 0) {
-                    if (isCrit) { spawnDebris(en.x + en.width/2, en.y + en.height/2, startHp); }
-                    enemies.splice(j, 1);
-                }
-                bullets.splice(i, 1); break;
-            }
-        }
-        if (b.y < -100) bullets.splice(i, 1);
-    }
 }
-
 function draw() {
     ctx.fillStyle = '#000'; ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
     drawStars();
@@ -461,6 +704,7 @@ function draw() {
             });
             if (Math.floor(Date.now() / 500) % 2 === 0) { ctx.fillStyle = '#f00'; ctx.textAlign = 'center'; ctx.fillText("[ CLICK TO RESTART ]", GAME_WIDTH/2, GAME_HEIGHT - 50); }
         }
+		
         ctx.restore(); return;
     }
     if (gameState === 'PLAY' || gameState === 'TRANSITION' || gameState === 'FAIL' || gameState === 'INPUT' || gameState === 'CRASHED') {
@@ -468,7 +712,80 @@ function draw() {
         ctx.fillStyle = '#fff'; ctx.font = 'bold 24px Courier New'; ctx.textAlign = 'left'; ctx.fillText(`LV: ${currentLevel}`, 20, 30);
         ctx.textAlign = 'center'; ctx.fillText(`SCORE: ${score}`, GAME_WIDTH / 2, 30); ctx.textAlign = 'right'; ctx.fillStyle = '#f00';
         let hearts = "♥".repeat(Math.max(0, lives)); ctx.fillText(`LIVES: ${hearts}`, GAME_WIDTH - 20, 30);
-        items.forEach(it => { ctx.fillStyle = (it.type==='num'?'#ff0':'#0f0'); ctx.font = 'bold 24px Courier New'; ctx.textAlign = 'center'; ctx.fillText(it.val, it.x, it.y); });
+		
+		let timerY = 60; // 30픽셀 아래(60)부터 타이머를 출력하네.
+        for (let key in activeItems) {
+			if (activeItems[key] > 0) {
+				// 1. 아이템 종류에 따라 색상과 라벨을 결정하네
+				let color = '#fff';
+				let label = '';
+
+				if (key === 'easyBusy') {
+					color = '#ff66cc'; // 핑크
+					label = 'EASY-BUSY';
+				} else if (key === 'heavyRotation') {
+					color = '#00ffff'; // 하늘색
+					label = 'HEAVY-ROT';
+				} else if (key === 'timeStop') {
+					color = '#ffff00'; // 타임스톱 전용 골드!
+					label = 'TIME-STOP';
+				}
+
+				// 2. 결정된 설정으로 텍스트를 그리네
+				ctx.fillStyle = color;
+				ctx.font = 'bold 18px Courier New';
+				ctx.textAlign = 'right';
+				
+				// 소수점 두 자리까지 출력해서 긴박함을 유지하지!
+				ctx.fillText(`${label}: ${activeItems[key].toFixed(2)}`, GAME_WIDTH - 20, timerY);
+				
+				// 다음 타이머가 겹치지 않게 아래로 내리네
+				timerY += 25; 
+			}
+		}
+        
+		// === [아이템 렌더링 영역] ===
+        items.forEach(it => {
+            ctx.save();
+            ctx.translate(it.x, it.y); // 아이템의 위치로 좌표축 이동
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            if (it.type === 'num') {
+                // 숫자 아이템 (일반은 노란색, 파편은 주황색)
+                ctx.fillStyle = (it.isDebris ? '#ffa500' : '#ff0');
+                ctx.font = (it.isDebris ? 'bold 20px' : 'bold 24px') + ' Courier New';
+                ctx.fillText(it.val, 0, 0);
+
+            } else if (it.type === 'sym') {
+                // 부호 아이템 (초록색)
+                ctx.fillStyle = '#0f0';
+                ctx.font = 'bold 24px Courier New';
+                ctx.fillText(it.val, 0, 0);
+
+            } else if (it.type === 'special') {
+                // [NEW] 특수 아이템 (사각형 그레이박싱)
+                let color = '#fff';
+                if (it.val === 'HEAVY_ROTATION') color = '#ff0'; // 노랑
+                else if (it.val === 'EASY_BUSY') color = '#f0f';     // 핑크
+                else if (it.val === 'TIME_STOP') color = '#0cf';     // 하늘
+                else if (it.val === 'PENETRATION') color = '#f33';   // 빨강
+
+                // 네온 효과 발동!
+                ctx.shadowColor = color;
+                ctx.shadowBlur = 15;
+                ctx.fillStyle = color;
+                ctx.fillRect(-15, -15, 30, 30); // 30x30 사이즈 박스
+
+                // 박스 위에 첫 글자 표시 (구분용)
+                ctx.shadowBlur = 0;
+                ctx.fillStyle = '#000';
+                ctx.font = 'bold 16px Arial';
+                ctx.fillText(it.val[0], 0, 0);
+            }
+            ctx.restore();
+        });
+		
         enemies.forEach(en => { ctx.strokeStyle = en.color; ctx.lineWidth = en.isBoss ? 4 : 2; ctx.strokeRect(en.x, en.y, en.width, en.height); ctx.fillStyle = '#fff'; ctx.font = '30px Courier New'; ctx.textAlign = 'center'; ctx.textBaseline='middle'; ctx.fillText(en.hp > 0 ? en.hp : "", en.x + en.width/2, en.y + en.height/2); });
         bullets.forEach(b => { ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(Math.PI/2); ctx.fillStyle = '#aaf'; ctx.font = '20px Courier New'; ctx.textAlign = 'center'; ctx.fillText(b.text, 0, 0); ctx.restore(); });
         if (gameState !== 'CRASHED' && gameState !== 'FAIL' && gameState !== 'GAMEOVER') {
@@ -476,6 +793,28 @@ function draw() {
             ctx.save(); if (!isDragging && gameState === 'PLAY') ctx.globalAlpha = 0.3; ctx.translate(player.x, player.y); ctx.fillStyle = '#0ff'; ctx.beginPath(); ctx.moveTo(0, -30); ctx.lineTo(-20, 20); ctx.lineTo(0, 10); ctx.lineTo(20, 20); ctx.closePath(); ctx.fill(); ctx.restore();
         }
         particles.forEach(p => { ctx.save(); ctx.globalAlpha = p.life; if (p.type === 'text') { ctx.translate(p.x, p.y); ctx.fillStyle = p.color; ctx.font = (p.isCritical?'bold 40px':'30px') + ' Courier New'; ctx.textAlign = 'center'; ctx.fillText(p.text, 0, 0); } else if (p.type === 'spark') { ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI*2); ctx.fill(); } else if (p.type === 'shockwave' || p.type === 'shockwave_visual') { ctx.strokeStyle = p.color; ctx.lineWidth = 5 * p.life; ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI*2); ctx.stroke(); } ctx.restore(); });
+		
+		// [STEP 4] PRINT 이벤트 텍스트 렌더링 (화면 70% 위치, 중앙 정렬, 무조건 한 줄)
+        if (activePrint && gameState === 'PLAY') {
+            ctx.save();
+            ctx.fillStyle = '#fff'; // 라디오 터미널 감성의 네온 그린
+            ctx.font = 'bold 22px Courier New';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            
+            // 적이나 총알 위에 글씨가 겹쳐도 잘 보이도록 검은색 테두리(그림자) 떡칠
+            ctx.shadowColor = '#000';
+            ctx.shadowBlur = 10;
+            ctx.lineWidth = 4;
+            ctx.strokeStyle = '#000';
+
+            const printY = GAME_HEIGHT * 0.8; // 자네가 주문한 '화면 아래쪽 70% 지점'
+
+            ctx.strokeText(activePrint.text, GAME_WIDTH / 2, printY);
+            ctx.fillText(activePrint.text, GAME_WIDTH / 2, printY);
+            ctx.restore();
+        }	
+		
         ctx.restore();
     }
 }
