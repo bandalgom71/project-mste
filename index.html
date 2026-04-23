@@ -532,7 +532,7 @@ function update(dt) {
 				if (it.type === 'special') {
                     if (it.val === 'EASY_BUSY') {
 						activeItems.easyBusy = 5.0; // 파트너의 요청대로 5초로 셋팅!
-						activePrint = { text: "EASY-BUSY: 10, +, × ONLY!", timer: 2.0 };
+						activePrint = { text: "EASY-BUSY!", timer: 2.0 };
 						
 						items.forEach(existingItem => {
 							// 화면에 떨어지고 있던 기존 숫자들을 전부 10으로 바꿈
@@ -548,12 +548,17 @@ function update(dt) {
 					
 					else if (it.val === 'HEAVY_ROTATION') {
 					activeItems.heavyRotation = 5.0; // 5초간 화력 집중!
-					activePrint = { text: "HEAVY ROTATION: LOCK & LOAD!", timer: 2.0 };
+					activePrint = { text: "HEAVY-ROTATION!", timer: 2.0 };
 					}
 					
 					else if (it.val === 'TIME_STOP') {
 					activeItems.timeStop = 5.0; // 느긋하게 요리할 수 있는 5초!
-					activePrint = { text: "TIME STOP: FREEZE!", timer: 2.0 };
+					activePrint = { text: "RED-LIGHT SPECIAL!", timer: 2.0 };
+					}
+					
+					else if (it.val === 'PENETRATION') {
+					activeItems.penetration = 15.0;
+					activePrint = { text: "관통 탄환 장전!", timer: 2.0 };
 					}
                     
                     SoundManager.playItemGet('special'); // 뿅! 하는 소리도 잊지 말고
@@ -725,10 +730,13 @@ function draw() {
 					label = 'EASY-BUSY';
 				} else if (key === 'heavyRotation') {
 					color = '#00ffff'; // 하늘색
-					label = 'HEAVY-ROT';
+					label = 'HEAVY-ROTATION';
 				} else if (key === 'timeStop') {
 					color = '#ffff00'; // 타임스톱 전용 골드!
-					label = 'TIME-STOP';
+					label = 'RED-LIGHT SPECIAL';
+				} else if (key === 'penetration') {
+					color = '#f33';
+					label = 'PENETRATION';
 				}
 
 				// 2. 결정된 설정으로 텍스트를 그리네
