@@ -157,6 +157,25 @@ const SoundManager = {
         osc.connect(gain); gain.connect(this.masterGain);
         osc.start(now); osc.stop(now + 1.2);
     },
+	// [로건의 팁] 깡- 하는 금속성 소리는 고음역대의 Square 파형을 짧게 쓰면 효과적이야.
+    playBlockSound: function() {
+        if (!this.ctx || this.isMuted) return;
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        
+        osc.type = 'square'; // 금속 느낌을 위해 사각파 사용
+        osc.frequency.setValueAtTime(1200, now); // 높은 음역대
+        osc.frequency.exponentialRampToValueAtTime(440, now + 0.1); // 빠르게 음을 떨어뜨림
+        
+        gain.gain.setValueAtTime(0.1, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+        
+        osc.connect(gain);
+        gain.connect(this.masterGain);
+        osc.start(now);
+        osc.stop(now + 0.1);
+    },
     playItemGet: function(type) {
         if (!this.ctx || this.isMuted) return;
         const now = this.ctx.currentTime;
@@ -238,13 +257,20 @@ function generateLevel(levelNum) {
                     duration: unit.duration,
                     col: unit.col // 아이템 위치를 위해 col도 같이 저장
                 });
-            } 
-            // 2순위: type이 없을 때만 '적'으로 생성
+            }             	
+			// 2순위: type이 없을 때만 '적'으로 생성
             else if (unit.col) {
                 const cellWidth = GAME_WIDTH / 7;
                 const px = (unit.col - 0.5) * cellWidth;
-                spawnList.push({ time: t, x: px, hp: unit.hp, isBoss: unit.isBoss || false });
-            }
+                // [수정] isCriticalOnly 속성을 데이터에서 가져와 저장하네!
+                spawnList.push({ 
+                    time: t, 
+                    x: px, 
+                    hp: unit.hp, 
+                    isBoss: unit.isBoss || false,
+                    isCriticalOnly: unit.isCriticalOnly || false // 이 줄을 추가하게
+                });
+            }			
         });
     }
     
@@ -458,10 +484,25 @@ function update(dt) {
 					});
                 }
 				
-            } else {
+			} else {
                 // 적 소환 (currentEnemySpeed 적용)
-                let width = data.isBoss ? 150 : ENEMY_WIDTH; let height = data.isBoss ? 100 : ENEMY_HEIGHT;
-                enemies.push({ x: data.x - width/2, y: -80, width, height, hp: data.hp, maxHp: data.hp, speed: currentEnemySpeed, color: data.isBoss?'#f00':'#fff', isBoss: data.isBoss });
+                let width = data.isBoss ? 150 : ENEMY_WIDTH; 
+                let height = data.isBoss ? 100 : ENEMY_HEIGHT;
+
+                // [로건의 수술] 이제 진짜 방패병의 데이터(isCriticalOnly)를 객체에 주입하네!
+                enemies.push({ 
+                    x: data.x - width/2, 
+                    y: -80, 
+                    width, 
+                    height, 
+                    hp: data.hp, 
+                    maxHp: data.hp, 
+                    speed: currentEnemySpeed, 
+                    color: data.isBoss ? '#f00' : '#fff', 
+                    isBoss: data.isBoss,
+                    // 이 줄이 추가되어야 충돌 판정 루프에서 "en.isCriticalOnly"를 인식할 수 있어
+                    isCriticalOnly: data.isCriticalOnly || false 
+                });
             }
             
             enemySpawnData.splice(i, 1);
@@ -470,8 +511,9 @@ function update(dt) {
 
     // PRINT 타이머 깎기 (update 함수 끝부분, requestAnimationFrame 호출 전쯤에 추가)
     if (activePrint) {
-        activePrint.timer -= dt;
-        if (activePrint.timer <= 0) activePrint = null;
+		// 게임 배속(TIME_SCALE)을 다시 나눠서 '진짜 흐른 시간'을 계산하네!
+		activePrint.timer -= (dt / TIME_SCALE); 
+		if (activePrint.timer <= 0) activePrint = null;
     }
 	
     
@@ -625,6 +667,19 @@ function update(dt) {
                 let cleanExpr = b.text.replace(/×/g, '*').replace(/÷/g, '/');
                 let dmg = 1; try { dmg = Math.floor(eval(cleanExpr)); } catch(e) {} if (dmg < 1) dmg = 1;
                 let isCrit = (en.hp === dmg);
+				
+				// === [로건의 수술 1: 직격탄 방패 로직] ===
+                if (en.isCriticalOnly && !isCrit) {
+                    SoundManager.playBlockSound(); // 깡!
+                    spawnExplosion(en.x + en.width/2, en.y + en.height/2, 'small', "BLOCK!", 0, 1);
+                    
+                    if (!b.isPiercing) {
+                        bullets.splice(i, 1);
+                        bulletDestroyed = true;
+                    }
+                    break; // 이번 총알은 이 적에게 막혔으므로 적 루프 종료
+                }
+				
                 let tier = (en.hp - dmg <= 0) ? (isCrit ? 'critical' : 'medium') : 'small';
                 let actualDmg = Math.min(en.hp, dmg);
                 
@@ -675,7 +730,16 @@ function update(dt) {
                         let en = enemies[j]; if (en.y < 0 || en.y > GAME_HEIGHT) continue; if (p.hitList.includes(en)) continue;
                         let dist = Math.hypot((en.x + en.width/2) - p.x, (en.y + en.height/2) - p.y);
                         if (dist < p.size - 10) {
-                            let isStrictCrit = (en.hp === p.damage); let actualDmg = Math.min(en.hp, p.damage);
+                            let isStrictCrit = (en.hp === p.damage); 
+							
+							// 적이 C타입인데 숫자가 딱 맞지 않으면 '깡-' 소리와 함께 무시!
+                            if (en.isCriticalOnly && !isStrictCrit) {
+                                SoundManager.playBlockSound(); // 깡!
+                                spawnExplosion(en.x + en.width/2, en.y + en.height/2, 'small', "BLOCK!", 0, 1);
+                                p.hitList.push(en); // 이번 충격파에는 이미 맞은 것으로 처리해서 중복 BLOCK 방지
+                                continue; // 아래의 대미지 처리 로직을 건너뛰고 다음 적 검사로 넘어감
+                            }
+							let actualDmg = Math.min(en.hp, p.damage);
                             score += actualDmg * p.multiplier; en.hp -= p.damage; p.hitList.push(en);
                             if (en.hp <= 0) {
                                 if (isStrictCrit) spawnDebris(en.x + en.width/2, en.y + en.height/2, p.damage);
@@ -794,7 +858,29 @@ function draw() {
             ctx.restore();
         });
 		
-        enemies.forEach(en => { ctx.strokeStyle = en.color; ctx.lineWidth = en.isBoss ? 4 : 2; ctx.strokeRect(en.x, en.y, en.width, en.height); ctx.fillStyle = '#fff'; ctx.font = '30px Courier New'; ctx.textAlign = 'center'; ctx.textBaseline='middle'; ctx.fillText(en.hp > 0 ? en.hp : "", en.x + en.width/2, en.y + en.height/2); });
+        enemies.forEach(en => { 
+            // 1. 기존의 바깥쪽 테두리를 그리네
+            ctx.strokeStyle = en.color; 
+            ctx.lineWidth = en.isBoss ? 4 : 2; 
+            ctx.strokeRect(en.x, en.y, en.width, en.height); 
+
+            // === [로건의 1픽셀 장갑 연출 시작] ===
+            // C타입 적이라면 안쪽에 1픽셀 간격으로 선을 하나 더 긋네
+            if (en.isCriticalOnly) {
+                // x, y는 1씩 키우고, width, height는 2씩 줄여야 
+                // 상하좌우가 모두 1픽셀씩 안으로 들어오게 되지
+                ctx.strokeRect(en.x + 3, en.y + 3, en.width - 6, en.height - 6);
+            }
+            // === [장갑 연출 끝] ===
+
+            // 2. 적의 HP 숫자 출력 (기존 코드 유지)
+            ctx.fillStyle = '#fff'; 
+            ctx.font = '30px Courier New'; 
+            ctx.textAlign = 'center'; 
+            ctx.textBaseline='middle'; 
+            ctx.fillText(en.hp > 0 ? en.hp : "", en.x + en.width/2, en.y + en.height/2); 
+        });
+		
         bullets.forEach(b => { ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(Math.PI/2); ctx.fillStyle = '#aaf'; ctx.font = '20px Courier New'; ctx.textAlign = 'center'; ctx.fillText(b.text, 0, 0); ctx.restore(); });
         if (gameState !== 'CRASHED' && gameState !== 'FAIL' && gameState !== 'GAMEOVER') {
             if (player.expr !== "") { ctx.save(); ctx.font = 'bold 40px Courier New'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; ctx.shadowColor = '#0f0'; ctx.shadowBlur = 10; ctx.fillStyle = '#fff'; ctx.fillText(player.expr, GAME_WIDTH / 2, GAME_HEIGHT - 20); ctx.restore(); }

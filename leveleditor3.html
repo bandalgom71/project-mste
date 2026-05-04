@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>MSTE Level Parser v4.0 (Storywriter Edition)</title>
+    <style>
+        body { background: #1a1a1a; color: #d4d4d4; font-family: 'Consolas', monospace; padding: 20px; }
+        h1 { border-bottom: 2px solid #ce9178; padding-bottom: 10px; color: #ce9178; }
+        .container { display: flex; gap: 20px; }
+        .box { flex: 1; display: flex; flex-direction: column; }
+        textarea { 
+            background: #252526; color: #fff; border: 1px solid #3c3c3c; 
+            padding: 10px; font-family: monospace; font-size: 14px; 
+            line-height: 1.5; white-space: pre; 
+            overflow-x: auto;
+        }
+        #inputData { height: 400px; }
+        #outputData { height: 600px; color: #ce9178; }
+        button { background: #0e639c; color: #fff; border: none; padding: 10px; font-size: 16px; font-weight: bold; cursor: pointer; margin: 5px 0; }
+        button:hover { background: #1177bb; }
+        button.copy { background: #4caf50; }
+        .guide { background: #333; padding: 15px; border-radius: 5px; color: #aaa; font-size: 0.9em; margin-bottom: 20px; line-height: 1.6; }
+        code { color: #4ec9b0; }
+    </style>
+</head>
+<body>
+
+    <h1>MSTE LEVEL ASSEMBLER v4.0 (Storywriter Edition)</h1>
+
+    <div class="guide">
+        <strong>[ v4.0 파싱 규칙 ]</strong><br>
+        1. <strong>7 Grid System:</strong> 엑셀의 1~7열이 화면의 가로 위치 1~7칸에 정확히 매칭됩니다.<br>
+        2. <strong>Stage 제어:</strong> <code>STAGE|1</code>로 시작하고 <code>STAGE|END</code>로 닫습니다. 여러 스테이지를 한 번에 파싱 가능합니다.<br>
+        3. <strong>Zero-Time Command:</strong> <code>BGM|</code>, <code>SPEED|</code>, <code>SYMBOL|</code>, <code>NUMBER|</code>, <code>PRINT|</code> 명령어는 게임 내 시간(Row)을 소모하지 않습니다.<br>
+        4. <strong>의도적 공백:</strong> 완전히 비워둔 엑셀 행(빈 줄)은 적 소환의 시간차(Delay)를 만듭니다.<br>
+        5. <strong>Print 문법:</strong> <code>PRINT|"출력할 대사"|노출시간(초)</code> 형태로 작성하세요.
+    </div>
+
+    <div class="container">
+        <div class="box">
+            <label>INPUT AREA (Paste Excel Here):</label>
+            <textarea id="inputData" placeholder="여기에 엑셀 데이터를 그대로 붙여넣으세요..."></textarea>
+            <button onclick="parseData()" style="flex:1;">⬇️ PARSE TO STAGES.JS</button>
+        </div>
+
+        <div class="box">
+            <label>FINAL OUTPUT (stages.js content):</label>
+            <textarea id="outputData" readonly>// 결과가 여기에 출력됩니다.</textarea>
+            <button onclick="copyToClipboard()" class="copy">📋 COPY FINAL CODE</button>
+        </div>
+    </div>
+
+<script>
+function parseData() {
+    const rawText = document.getElementById('inputData').value;
+    if (!rawText.trim()) { alert("데이터가 비어있습니다!"); return; }
+
+    const rows = rawText.split('\n');
+    let allLevels = [];
+    let currentLevel = null;
+    let currentRowOffset = 0; // 게임 내 타임라인 (Row)
+
+    rows.forEach((rowStr) => {
+        // 엑셀 탭(\t) 분리
+        let cols = rowStr.split('\t').map(c => c.trim());
+        let firstCell = cols[0] || '';
+
+        // 1. 스테이지 시작/종료 처리
+        if (firstCell.toUpperCase().startsWith('STAGE|')) {
+            let stageInfo = firstCell.split('|')[1].trim().toUpperCase();
+            if (stageInfo === 'END') {
+                if (currentLevel) {
+                    allLevels.push(currentLevel);
+                    currentLevel = null;
+                }
+            } else {
+                let lvlNum = parseInt(stageInfo);
+                if (!isNaN(lvlNum)) {
+                    currentLevel = { level: lvlNum, spawnList: [] };
+                    currentRowOffset = 0; // 새 스테이지마다 시간 초기화
+                }
+            }
+            return; // 명령어는 시간 증가 안 함
+        }
+
+        // 스테이지 선언 밖의 데이터는 무시
+        if (!currentLevel) return;
+
+        // 2. 명령어 처리 (시간 증가 안 함)
+        if (firstCell.toUpperCase().startsWith('BGM|')) {
+            let val = firstCell.split('|')[1].trim();
+            currentLevel.spawnList.push({ row: currentRowOffset, type: 'BGM', val: val });
+            return;
+        }
+        if (firstCell.toUpperCase().startsWith('SPEED|')) {
+            let val = parseFloat(firstCell.split('|')[1].trim());
+            currentLevel.spawnList.push({ row: currentRowOffset, type: 'SPEED', val: val });
+            return;
+        }
+        if (firstCell.toUpperCase().startsWith('SYMBOL|')) {
+            let val = firstCell.substring(7).split(',').map(s => s.trim());
+            currentLevel.spawnList.push({ row: currentRowOffset, type: 'SYMBOL', val: val });
+            return;
+        }
+        if (firstCell.toUpperCase().startsWith('NUMBER|')) {
+            let val = firstCell.substring(7).split(',').map(n => parseInt(n.trim()));
+            currentLevel.spawnList.push({ row: currentRowOffset, type: 'NUMBER', val: val });
+            return;
+        }
+        if (firstCell.toUpperCase().startsWith('PRINT|')) {
+            // 정규식으로 "텍스트"와 숫자 분리
+            let match = firstCell.match(/PRINT\|"([^"]+)"\|([\d.]+)/);
+            if (match) {
+                currentLevel.spawnList.push({ row: currentRowOffset, type: 'PRINT', text: match[1], duration: parseFloat(match[2]) });
+            }
+            return;
+        }
+
+        // 3. 완전한 빈 줄 (시간만 증가)
+        if (cols.join('') === '') {
+            currentRowOffset++;
+            return;
+        }
+
+        // 4. 적 배치 처리 (1~7열까지만 검사)
+        let hasEnemy = false;
+        for (let i = 0; i < 7; i++) {
+            let cellData = cols[i];
+            if (!cellData) continue;
+            
+            let val = cellData.trim();
+            if (!val) continue;
+
+            let hp = 0;
+            let isBoss = false;
+            let colIndex = i + 1; // 1 ~ 7 위치
+			
+			let hasEnemy = false;        
+
+            if (val.toUpperCase().startsWith('ITEM')) {
+                let itemCode = '';
+                // ITEM|HR 방식과 ITEM(HR) 방식을 모두 지원
+                if (val.includes('|')) itemCode = val.split('|')[1].trim().toUpperCase();
+                else if (val.includes('(')) itemCode = val.match(/\(([^)]+)\)/)[1].trim().toUpperCase();
+                
+                let itemName = itemCode;
+                if (itemCode === 'HR') itemName = 'HEAVY_ROTATION';
+                if (itemCode === 'TS') itemName = 'TIME_STOP';
+                if (itemCode === 'EB') itemName = 'EASY_BUSY';
+                if (itemCode === 'PN') itemName = 'PENETRATION';
+
+                currentLevel.spawnList.push({ 
+                    row: currentRowOffset, 
+                    col: colIndex, 
+                    type: 'ITEM',
+                    val: itemName
+                });
+                continue; // 아이템 처리가 끝났으니 다음 칸(열)으로 넘어감
+            }
+
+			if (val.toUpperCase().startsWith('C')) {
+				let hpVal = 0;
+				let match = val.match(/\((\d+)\)/); // 괄호 안의 숫자 추출 로직
+				if (match) hpVal = parseInt(match[1]);
+
+				if (hpVal > 0) {
+					currentLevel.spawnList.push({ 
+						row: currentRowOffset, 
+						col: colIndex, 
+						hp: hpVal, 
+						isCriticalOnly: true // 이 녀석이 게임 엔진에 보낼 핵심 꼬리표야
+					});
+					continue; // 처리가 끝났으니 다음 칸으로 넘어감
+				}
+			}
+
+            if (val.toUpperCase().startsWith('B')) {
+                hp = 100; isBoss = true;
+                let match = val.match(/\((\d+)\)/);
+                if (match) hp = parseInt(match[1]);
+            } else {
+                hp = parseInt(val);
+            }
+
+            if ((!isNaN(hp) && hp > 0) || isBoss) {
+                currentLevel.spawnList.push({ 
+                    row: currentRowOffset, 
+                    col: colIndex, 
+                    hp: hp, 
+                    isBoss: isBoss 
+                });
+                hasEnemy = true;
+            }
+        }
+
+        // 적이 한 명이라도 있었거나, 잡동사니가 적혀 있어도 시간은 흐름
+        currentRowOffset++;
+    });
+
+    // 만약 STAGE|END 없이 끝났을 경우를 대비한 안전장치
+    if (currentLevel) { allLevels.push(currentLevel); }
+
+    // --- 출력 생성 ---
+    let output = "// [ MSTE STAGE DATA GENERATED BY PARSER v4.0 ]\n";
+    output += "const STAGE_DATA = [\n";
+
+    allLevels.forEach((lvl, idx) => {
+        output += `    // === LEVEL ${lvl.level} ===\n`;
+        output += "    {\n";
+        output += `        level: ${lvl.level},\n`;
+        output += "        spawnList: [\n";
+        
+        // 시간(row) 순으로 정렬
+        lvl.spawnList.sort((a,b) => a.row - b.row);
+
+        lvl.spawnList.forEach(unit => {
+            let line = `            { row: ${unit.row}`;
+            
+            if (unit.type) {
+                // 명령어 타입
+                line += `, type: '${unit.type}'`;
+                if (unit.type === 'BGM' || unit.type === 'PRINT') {
+                    if (unit.type === 'PRINT') {
+                        line += `, text: "${unit.text}", duration: ${unit.duration}`;
+                    } else {
+                        line += `, val: '${unit.val}'`;
+                    }
+				} else if (unit.type === 'ITEM') {
+                    line += `, col: ${unit.col}, val: '${unit.val}'`;				
+                } else if (unit.type === 'SYMBOL') {
+                    line += `, val: [${unit.val.map(s => `'${s}'`).join(', ')}]`;
+                } else if (unit.type === 'NUMBER') {
+                    line += `, val: [${unit.val.join(', ')}]`;
+                } else {
+                    line += `, val: ${unit.val}`;
+                }
+            } else {
+                // 적 타입
+                line += `, col: ${unit.col}, hp: ${unit.hp}`;
+                if (unit.isBoss) line += `, isBoss: true`;
+				// 3. C타입 적(Critical Only) 꼬리표 출력 추가
+                if (unit.isCriticalOnly) line += `, isCriticalOnly: true`;
+            }
+            line += ` },`;
+            output += line + "\n";
+        });
+
+        output += "        ]\n";
+        output += "    }" + (idx < allLevels.length - 1 ? "," : "") + "\n\n";
+    });
+
+    output += "];\n";
+    document.getElementById('outputData').value = output;
+}
+
+function copyToClipboard() {
+    const copyText = document.getElementById("outputData");
+    copyText.select();
+    document.execCommand("copy");
+    alert("코드 복사 완료! stages.js 파일에 덮어쓰세요.");
+}
+</script>
+
+</body>
+</html>
