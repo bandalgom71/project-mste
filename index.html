@@ -888,7 +888,7 @@ function draw() {
         }
         particles.forEach(p => { ctx.save(); ctx.globalAlpha = p.life; if (p.type === 'text') { ctx.translate(p.x, p.y); ctx.fillStyle = p.color; ctx.font = (p.isCritical?'bold 40px':'30px') + ' Courier New'; ctx.textAlign = 'center'; ctx.fillText(p.text, 0, 0); } else if (p.type === 'spark') { ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI*2); ctx.fill(); } else if (p.type === 'shockwave' || p.type === 'shockwave_visual') { ctx.strokeStyle = p.color; ctx.lineWidth = 5 * p.life; ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI*2); ctx.stroke(); } ctx.restore(); });
 		
-		// [STEP 4] PRINT 이벤트 텍스트 렌더링 (화면 70% 위치, 중앙 정렬, 무조건 한 줄)
+		// [STEP 4] PRINT 이벤트 텍스트 렌더링 (멀티 라인 지원으로 업그레이드)
         if (activePrint && gameState === 'PLAY') {
             ctx.save();
             ctx.fillStyle = '#fff'; // 라디오 터미널 감성의 네온 그린
@@ -904,8 +904,21 @@ function draw() {
 
             const printY = GAME_HEIGHT * 0.8; // 자네가 주문한 '화면 아래쪽 70% 지점'
 
-            ctx.strokeText(activePrint.text, GAME_WIDTH / 2, printY);
-            ctx.fillText(activePrint.text, GAME_WIDTH / 2, printY);
+            // [로건의 수술] \n 기호를 기준으로 텍스트를 쪼개서 배열로 만드네.
+            // 엑셀에서 넘어온 텍스트 형태의 \\n 과 실제 줄바꿈 \n 을 모두 처리하는 안전장치.
+            let lines = String(activePrint.text).split(/\\n|\n/);
+            let lineHeight = 30; // 줄 간격 30픽셀
+            
+            // 텍스트가 여러 줄일 경우 위아래 밸런스를 맞추기 위해 시작 Y좌표를 끌어올림.
+            let startY = printY - ((lines.length - 1) * lineHeight) / 2;
+
+            // 쪼개진 텍스트 배열을 돌면서 줄 간격만큼 아래로 내리며 그리네.
+            lines.forEach((line, index) => {
+                let currentY = startY + (index * lineHeight);
+                ctx.strokeText(line, GAME_WIDTH / 2, currentY);
+                ctx.fillText(line, GAME_WIDTH / 2, currentY);
+            });
+            
             ctx.restore();
         }	
 		
