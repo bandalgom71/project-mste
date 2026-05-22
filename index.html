@@ -17,7 +17,7 @@
         p { font-size: 20px; animation: blink 1s infinite; }
         @keyframes blink { 50% { opacity: 0; } }
         #highscore-input { background: rgba(0, 0, 0, 0.9); border: 2px solid #0f0; padding: 20px; text-align: center; pointer-events: auto; box-shadow: 0 0 20px #0f0; z-index: 10; }
-        #initials { background: #000; border: none; border-bottom: 2px solid #fff; color: #fff; font-family: 'Courier New', monospace; font-size: 30px; text-align: center; width: 100px; text-transform: uppercase; outline: none; }
+        #initials { background: #000; border: none; border-bottom: 2px solid #fff; color: #fff; font-family: 'Courier New', monospace; font-size: 30px; text-align: center; width: 260px; text-transform: uppercase; outline: none; }
         #submit-btn { display: block; margin: 20px auto 0; padding: 10px 20px; background: #0f0; color: #000; border: none; font-weight: bold; font-size: 18px; cursor: pointer; }
         .hidden { display: none !important; }
     </style>
@@ -33,8 +33,8 @@
     <div id="highscore-input" class="hidden">
         <h2 style="color:#ff0; margin-top:0;">NEW GLOBAL RECORD!</h2>
         <p style="color:#fff;">ENTER INITIALS:</p>
-        <input type="text" id="initials" maxlength="3" autocomplete="off">
-        <button id="submit-btn">UPLOAD</button>
+        <input type="text" id="initials" maxlength="10" autocomplete="off">
+        <button id="submit-btn">ENTER</button>
     </div>
 </div>
 
@@ -48,7 +48,7 @@
  * - Fix: isFetching variable explicitly declared to prevent ReferenceError.
  */
 
-const SERVER_URL = "https://script.google.com/macros/s/AKfycbyuDE-Zr7x7MdQu-Zj_hO3bl844y4YH7MguctqNkG5nzmGfdF8GtFNTMupG0Tfdm9m-/exec";
+const SERVER_URL = "https://mste-game-ranking-default-rtdb.firebaseio.com/scores.json";
 
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
@@ -206,8 +206,53 @@ initStars();
 // --- SERVER LOGIC ---
 let globalScores = [];
 let isFetching = false; // [로건의 안전장치] 혹시 모를 Reference Error 방지용
-function fetchGlobalScores() { isFetching = true; fetch(SERVER_URL).then(r => r.json()).then(d => { if(Array.isArray(d)) globalScores = d; isFetching = false; }).catch(e => { isFetching = false; }); }
-function sendGlobalScore(name, finalScore) { gameState = 'UPLOADING'; highscoreInput.classList.add('hidden'); fetch(SERVER_URL, { method: 'POST', body: JSON.stringify({ name: name, score: finalScore }) }).then(r => r.json()).then(() => { fetchGlobalScores(); setTimeout(showLeaderboard, 1000); }).catch(() => { setTimeout(showLeaderboard, 1000); }); }
+function fetchGlobalScores() { 
+    isFetching = true; 
+    fetch(SERVER_URL)
+        .then(r => r.json())
+        .then(d => { 
+            let tempList = [];
+            // 파이어베이스에서 받은 객체 데이터들을 자바스크립트 배열로 정제하네!
+            if (d && typeof d === 'object') {
+                Object.keys(d).forEach(key => {
+                    if (d[key] && d[key].name && d[key].score !== undefined) {
+                        tempList.push({ name: d[key].name, score: d[key].score });
+                    }
+                });
+            }
+            // 점수가 높은 순(내림차순)으로 칼같이 정렬하여 상위 20개만 슬라이스!
+            tempList.sort((a, b) => b.score - a.score);
+            globalScores = tempList.slice(0, 20);
+            isFetching = false; 
+        })
+        .catch(e => { 
+            console.log("DB Fetch Error:", e);
+            isFetching = false; 
+        }); 
+}
+
+function sendGlobalScore(name, finalScore) { 
+    gameState = 'UPLOADING'; 
+    highscoreInput.classList.add('hidden'); 
+    
+    // 파이어베이스 서버로 이름과 점수를 즉각 POST 발사!
+    fetch(SERVER_URL, { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name, score: finalScore }) 
+    })
+    .then(r => r.json())
+    .then(() => { 
+        // 업로드가 끝나면 즉시 랭킹을 새로 읽어오고 랭킹 스크린 로드!
+        fetchGlobalScores(); 
+        setTimeout(showLeaderboard, 500); // 응답이 워낙 빨라 대기시간을 0.5초로 단축했네!
+    })
+    .catch((e) => { 
+        console.log("DB Send Error:", e);
+        setTimeout(showLeaderboard, 500); 
+    }); 
+}
+
 function checkIsHighScore(finalScore) { if (globalScores.length < 20) return true; return finalScore > globalScores[globalScores.length - 1].score; }
 fetchGlobalScores();
 
@@ -232,7 +277,82 @@ function getGameCoordinates(clientX, clientY) { return { x: (clientX - canvasOff
 messageBox.addEventListener('mousedown', handleUiClick);
 messageBox.addEventListener('touchstart', (e) => { e.preventDefault(); handleUiClick(); });
 function handleUiClick() { if (gameState === 'START' || gameState === 'LEADERBOARD') startGame(); else if (gameState === 'TRANSITION') resetStage(); }
-submitBtn.addEventListener('click', () => { const name = initialsField.value.toUpperCase().substring(0, 3) || "UNK"; sendGlobalScore(name, score); });
+
+submitBtn.addEventListener('click', () => {
+    const nameField = document.getElementById('initials');
+    let name = nameField.value.trim().toUpperCase();
+    if (name === "") name = "UNKNOWN";
+    
+    let tz = "";
+    try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch(e) { tz = ""; }
+    
+    // 이모지가 아니라 2글자 표준 국가 코드를 부여하네!
+    let cc = "GLOBAL"; 
+    
+    if (!tz) { cc = "GLOBAL"; }
+    // --- [동아시아 & 오세아니아] ---
+    else if (tz.includes("Seoul")) cc = "KR";
+    else if (tz.includes("Tokyo")) cc = "JP";
+    else if (tz.includes("Shanghai") || tz.includes("Beijing") || tz.includes("Chongqing") || tz.includes("Urumqi")) cc = "CN";
+    else if (tz.includes("Hong_Kong")) cc = "HK";
+    else if (tz.includes("Taipei")) cc = "TW";
+    else if (tz.includes("Singapore")) cc = "SG";
+    else if (tz.includes("Sydney") || tz.includes("Melbourne") || tz.includes("Brisbane") || tz.includes("Perth") || tz.includes("Adelaide") || tz.includes("Darwin")) cc = "AU";
+    else if (tz.includes("Auckland") || tz.includes("Wellington")) cc = "NZ";
+    
+    // --- [동남아시아 & 남아시아] ---
+    else if (tz.includes("Bangkok")) cc = "TH";
+    else if (tz.includes("Saigon") || tz.includes("Hanoi")) cc = "VN";
+    else if (tz.includes("Jakarta") || tz.includes("Pontianak") || tz.includes("Makassar") || tz.includes("Jayapura")) cc = "ID";
+    else if (tz.includes("Kuala_Lumpur") || tz.includes("Kuching")) cc = "MY";
+    else if (tz.includes("Manila")) cc = "PH";
+    else if (tz.includes("Calcutta") || tz.includes("Kolkata") || tz.includes("Mumbai") || tz.includes("Delhi")) cc = "IN";
+    
+    // --- [북미 & 남미 대륙] ---
+    else if (tz.includes("New_York") || tz.includes("Los_Angeles") || tz.includes("Chicago") || tz.includes("Denver") || tz.includes("Phoenix") || tz.includes("Anchorage") || tz.includes("Honolulu")) cc = "US";
+    else if (tz.includes("Toronto") || tz.includes("Vancouver") || tz.includes("Montreal") || tz.includes("Edmonton") || tz.includes("Winnipeg")) cc = "CA";
+    else if (tz.includes("Mexico_City") || tz.includes("Cancun") || tz.includes("Monterrey")) cc = "MX";
+    else if (tz.includes("Sao_Paulo") || tz.includes("Rio_Branco") || tz.includes("Manaus") || tz.includes("Belem") || tz.includes("Brasilia")) cc = "BR";
+    else if (tz.includes("Buenos_Aires") || tz.includes("Cordoba")) cc = "AR";
+    else if (tz.includes("Santiago")) cc = "CL";
+    else if (tz.includes("Bogota")) cc = "CO";
+    else if (tz.includes("Lima")) cc = "PE";
+    
+    // --- [서유럽 & 북유럽] ---
+    else if (tz.includes("London")) cc = "GB";
+    else if (tz.includes("Paris")) cc = "FR";
+    else if (tz.includes("Berlin") || tz.includes("Busingen")) cc = "DE";
+    else if (tz.includes("Rome")) cc = "IT";
+    else if (tz.includes("Madrid")) cc = "ES";
+    else if (tz.includes("Amsterdam")) cc = "NL";
+    else if (tz.includes("Brussels")) cc = "BE";
+    else if (tz.includes("Zurich")) cc = "CH";
+    else if (tz.includes("Vienna")) cc = "AT";
+    else if (tz.includes("Stockholm")) cc = "SE";
+    else if (tz.includes("Oslo")) cc = "NO";
+    else if (tz.includes("Copenhagen")) cc = "DK";
+    else if (tz.includes("Helsinki")) cc = "FI";
+    else if (tz.includes("Dublin")) cc = "IE";
+    else if (tz.includes("Lisbon")) cc = "PT";
+    
+    // --- [동유럽, 중동 & 아프리카] ---
+    else if (tz.includes("Warsaw")) cc = "PL";
+    else if (tz.includes("Prague")) cc = "CZ";
+    else if (tz.includes("Budapest")) cc = "HU";
+    else if (tz.includes("Moscow") || tz.includes("St_Petersburg") || tz.includes("Vladivostok") || tz.includes("Novosibirsk")) cc = "RU";
+    else if (tz.includes("Kiev") || tz.includes("Kyiv") || tz.includes("Uzhgorod")) cc = "UA";
+    else if (tz.includes("Dubai")) cc = "AE";
+    else if (tz.includes("Riyadh")) cc = "SA";
+    else if (tz.includes("Jerusalem") || tz.includes("Tel_Aviv")) cc = "IL";
+    else if (tz.includes("Istanbul")) cc = "TR";
+    else if (tz.includes("Cairo")) cc = "EG";
+    else if (tz.includes("Johannesburg")) cc = "ZA";
+    
+    // DB에는 "KR LOGAN" 형태로 저장!
+    let fullName = cc + " " + name;
+    sendGlobalScore(fullName, score);
+});
+
 initialsField.addEventListener('keypress', (e) => { if (e.key === 'Enter') submitBtn.click(); });
 
 // --- LOGIC ---
@@ -341,6 +461,23 @@ window.addEventListener('keydown', function(e) {
             }
         }
     }
+	
+	if ((e.key === 'z' || e.key === 'Z') && gameState === 'PLAY') {
+            console.log("🛠️ [DEBUG] 관제탑 권한으로 즉시 하이스코어 검증 및 게임오버 진입!");
+            document.body.style.cursor = 'default';
+            // 자네가 설계해 둔 게임오버 프로세스를 다이렉트로 가동하네!
+            fetchGlobalScores(); 
+            if (checkIsHighScore(score)) { 
+                gameState = 'INPUT'; 
+                messageBox.classList.add('hidden'); 
+                highscoreInput.classList.remove('hidden'); 
+                initialsField.value = ""; 
+                initialsField.focus(); 
+            } else { 
+                showLeaderboard(); 
+            }
+        }
+	
 });
 window.addEventListener('mousemove', e => updatePlayerPos(e.clientX, e.clientY));
 window.addEventListener('touchmove', e => { e.preventDefault(); updatePlayerPos(e.touches[0].clientX, e.touches[0].clientY); }, { passive: false });
@@ -860,10 +997,52 @@ function draw() {
         else if (isFetching) { ctx.fillStyle = '#ff0'; ctx.font = '30px Courier New'; ctx.fillText("FETCHING DATA...", GAME_WIDTH/2, GAME_HEIGHT/2); } 
         else {
             ctx.textAlign = 'left'; let startY = 220;
-            globalScores.forEach((entry, idx) => {
-                if (idx >= 20) return; let rank = (idx + 1) + "."; let color = (entry.score === score && entry.name === initialsField.value) ? '#ff0' : '#fff';
-                ctx.fillStyle = color; ctx.fillText(rank.padEnd(4) + String(entry.name).padEnd(5) + String(entry.score).padStart(8), 150, startY + (idx * 35));
-            });
+			
+			globalScores.forEach((row, i) => {
+            ctx.fillStyle = (i === 0) ? '#ff0' : (i === 1) ? '#ccc' : (i === 2) ? '#cd7f32' : '#fff';
+            ctx.textAlign = 'left';
+            
+            // 1. 등수 출력
+            ctx.fillText(`${i + 1}.`, 80, 180 + i * 28);
+            
+            // 2. 이름 데이터 분석 ("KR LOGAN" -> 국가코드 "KR"과 이름 "LOGAN" 분리)
+            let firstSpace = row.name.indexOf(" ");
+            let countryCode = "GLOBAL";
+            let displayName = row.name;
+            
+            if (firstSpace !== -1) {
+                countryCode = row.name.substring(0, firstSpace);
+                displayName = row.name.substring(firstSpace + 1);
+            }
+            
+            // 3. 국기 이미지 실시간 로드 및 렌더링 (텍스트 KR/US 등은 화면에서 증발시킴!)
+            if (countryCode !== "GLOBAL") {
+                let flagImg = new Image();
+                // 전 세계 무료 국기 CDN에서 24x18 픽셀 크기의 이쁜 png 이미지를 다이렉트로 가져오네!
+                flagImg.src = `https://flagcdn.com/24x18/${countryCode.toLowerCase()}.png`;
+                
+                // 이미지가 로드되면 캔버스에 정확한 위치에 비추도록 설계!
+                flagImg.onload = function() {
+                    // 랭킹창이 열려있을 때만 정확한 좌표에 안착
+                    if (gameState === 'LEADERBOARD') {
+                        ctx.drawImage(flagImg, 140, 164 + i * 28, 24, 18);
+                    }
+                };
+                // 로드 완료 전이거나 캐싱된 경우를 위해 즉시 그리기 명령도 동시 대기
+                ctx.drawImage(flagImg, 140, 164 + i * 28, 24, 18);
+            } else {
+                // 국가 매핑이 안 된 글로벌 유저는 기존처럼 이모지나 대체 텍스트 출력
+                ctx.fillText("🌐", 140, 180 + i * 28);
+            }
+            
+            // 4. 순수 유저 닉네임 출력 (국기 이미지 뒤쪽인 180px 지점부터 시원하게 출력!)
+            ctx.fillText(displayName, 180, 180 + i * 28);
+            
+            // 5. 점수 출력
+            ctx.textAlign = 'right';
+            ctx.fillText(row.score, 520, 180 + i * 28);
+        });
+			
             if (Math.floor(Date.now() / 500) % 2 === 0) { ctx.fillStyle = '#f00'; ctx.textAlign = 'center'; ctx.fillText("[ CLICK TO RESTART ]", GAME_WIDTH/2, GAME_HEIGHT - 50); }
         }
 		
