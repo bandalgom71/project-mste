@@ -89,7 +89,7 @@ let lives = 3;
 let currentEnemySpeed = ENEMY_BASE_SPEED;
 let currentSymbols = ['+', '+', '-', '×', '÷']; 
 let currentNumbers = [1, 2, 3, 4, 5, 6, 7, 8, 9];
-let activePrint = null; // 텍스트와 남은 시간을 담을 객체
+let scrollingTexts = [];
 let activeItems = {
     easyBusy: 0,
     penetration: 0,
@@ -285,6 +285,23 @@ function generateLevel(levelNum) {
     return spawnList;
 }
 
+function spawnForceNumbers(targetNumbers) {
+    targetNumbers.forEach(num => {
+        let radius = 20; 
+        let x = Math.random() * (GAME_WIDTH - radius * 2) + radius; 
+        let y = -radius; 
+        
+        items.push({
+            type: 'num', // 자네가 아래 메인 루프에서 사용하는 대문자 규격에 완벽 일치!
+            val: num,
+            x: x,
+            y: y,
+            radius: radius,
+            speed: Math.random() * 150 + 150 // [보정] dt 기반 물리엔진에 맞춰 초당 150~300픽셀 낙하 속도 부여
+        });
+    });
+}
+
 function startGame() { SoundManager.init(); score = 0; currentLevel = 1; lives = 3; resetStage(); }
 function resetStage() {
     gameState = 'PLAY'; messageBox.classList.add('hidden'); highscoreInput.classList.add('hidden'); document.body.style.cursor='none';
@@ -293,7 +310,7 @@ function resetStage() {
 	currentEnemySpeed = ENEMY_BASE_SPEED;
     currentSymbols = [];
     currentNumbers = [];
-    activePrint = null;
+	scrollingTexts = [];
     enemySpawnData = generateLevel(currentLevel);
     lastTime = performance.now(); isDragging = true; requestAnimationFrame(gameLoop);
 }
@@ -308,6 +325,24 @@ window.addEventListener('mousedown', () => { if (gameState === 'LEADERBOARD') st
 window.addEventListener('touchstart', (e) => { if (gameState === 'LEADERBOARD') { e.preventDefault(); startGame(); } else if (gameState === 'PLAY') { e.preventDefault(); isDragging = true; } }, { passive: false });
 window.addEventListener('mouseup', () => { if(gameState==='PLAY' && isDragging) { isDragging = false; fireBullet(); }});
 window.addEventListener('touchend', () => { if(gameState==='PLAY' && isDragging) { isDragging = false; fireBullet(); }});
+window.addEventListener('keydown', function(e) {
+    if (e.key === 'n' || e.key === 'N') {
+        if (gameState === 'PLAY') { // 플레이 중일 때만 작동
+            console.log("🛠️ [DEBUG] 관제탑 권한으로 다음 스테이지 강제 진입!");
+            
+            // 다음 스테이지 인덱스로 증가 (현재 레벨이 1부터 시작하므로 index.js 매칭)
+            currentLevel++; 
+            
+            // 만약 다음 스테이지 데이터가 있으면 전환, 없으면 엔딩 처리
+            if (typeof STAGE_DATA !== 'undefined' && currentLevel <= STAGE_DATA.length) {
+                resetStage(); // 자네가 만든 스테이지 리셋 및 로드 함수 호출!
+            } else {
+                console.log("🛠️ [DEBUG] 마지막 스테이지입니다. 게임 클리어 상태로 전환합니다.");
+                gameState = 'CLEAR'; 
+            }
+        }
+    }
+});
 window.addEventListener('mousemove', e => updatePlayerPos(e.clientX, e.clientY));
 window.addEventListener('touchmove', e => { e.preventDefault(); updatePlayerPos(e.touches[0].clientX, e.touches[0].clientY); }, { passive: false });
 
@@ -464,7 +499,19 @@ function update(dt) {
                 else if (data.type === 'SPEED') { currentEnemySpeed = data.val; }
                 else if (data.type === 'SYMBOL') { currentSymbols = data.val; }
                 else if (data.type === 'NUMBER') { currentNumbers = data.val; }
-                else if (data.type === 'PRINT') { activePrint = { text: data.text, timer: data.duration }; }                                
+				else if (data.type === 'FORCE') { spawnForceNumbers(data.val); }
+                else if (data.type === 'PRINT') {
+					// 엑셀이나 파일에서 \n 혹은 실제 줄바꿈 문자가 들어왔을 때를 대비한 분할 처리
+					let lines = String(data.text).split(/\\\\n|\n/);
+					
+					// 글로벌 스크롤 메시지 배열에 새로운 오브젝트 주입!
+					scrollingTexts.push({
+						lines: lines,
+						x: GAME_WIDTH / 2,     // 화면 정중앙 좌표
+						y: -30 * lines.length, // 글자 수(줄 수)에 맞춰 화면 위쪽 안 보이는 곳에 스폰
+						speed: currentEnemySpeed * 2,
+						opacity: 1             // 초기 투명도 (선명함)
+					});}
                 else if (data.type === 'ITEM') {
                     const colWidth = GAME_WIDTH / 7;
                     const xPos = (data.col - 1) * colWidth + (colWidth / 2);
@@ -509,12 +556,27 @@ function update(dt) {
         }
     }
 
-    // PRINT 타이머 깎기 (update 함수 끝부분, requestAnimationFrame 호출 전쯤에 추가)
-    if (activePrint) {
-		// 게임 배속(TIME_SCALE)을 다시 나눠서 '진짜 흐른 시간'을 계산하네!
-		activePrint.timer -= (dt / TIME_SCALE); 
-		if (activePrint.timer <= 0) activePrint = null;
-    }
+    if (gameState === 'PLAY') {
+		for (let i = scrollingTexts.length - 1; i >= 0; i--) {
+			let txt = scrollingTexts[i];
+			
+			// 스테이지 현재 전장 스크롤 속도에 맞춰 실제 시간(dt)만큼 아래로 이동!
+			txt.y += txt.speed * dt; 
+
+			// [전술 연출] 화면 하단(GAME_HEIGHT)에 가까워질수록 자연스럽게 페이드아웃(투명화)
+			// 화면 하단 도달 150픽셀 전부터 부드럽게 사라지도록 설계했네.
+			let fadeZone = GAME_HEIGHT - 150;
+			if (txt.y > fadeZone) {
+				let distance = GAME_HEIGHT + 100 - txt.y;
+				txt.opacity = Math.max(0, distance / (GAME_HEIGHT + 100 - fadeZone));
+			}
+
+			// 완전히 화면 밖(하단 마진 100픽셀)으로 탈출하면 배열에서 즉시 삭제하여 메모리 보호!
+			if (txt.y > GAME_HEIGHT + 100) {
+				scrollingTexts.splice(i, 1);
+			}
+		}
+	}
 	
     
     lastSpawnNum += dt * 1000; lastSpawnSym += dt * 1000;
@@ -572,41 +634,33 @@ function update(dt) {
             if (pickupTimer <= 0) {
 			
 				if (it.type === 'special') {
-                    if (it.val === 'EASY_BUSY') {
-						activeItems.easyBusy = 5.0; // 파트너의 요청대로 5초로 셋팅!
-						activePrint = { text: "EASY-BUSY!", timer: 2.0 };
+					if (it.val === 'EASY_BUSY') {
+						activeItems.easyBusy = 5.0;
+						// activePrint를 지우고, 흐르는 텍스트 배열에 직접 주입하네!
+						scrollingTexts.push({ lines: ["EASY-BUSY!"], x: GAME_WIDTH / 2, y: it.y, speed: currentEnemySpeed, opacity: 1 });
 						
 						items.forEach(existingItem => {
-							// 화면에 떨어지고 있던 기존 숫자들을 전부 10으로 바꿈
-							if (existingItem.type === 'num' && !existingItem.isDebris) {
-								existingItem.val = 10;
-							} 
-							// 화면에 있던 기존 부호들을 + 또는 ×로 바꿈
-							else if (existingItem.type === 'sym') {
-								existingItem.val = Math.random() < 0.5 ? '+' : '×';
-							}
-						});	
+							if (existingItem.type === 'num' && !existingItem.isDebris) existingItem.val = 10;
+							else if (existingItem.type === 'sym') existingItem.val = Math.random() < 0.5 ? '+' : '×';
+						}); 
 					}
-					
 					else if (it.val === 'HEAVY_ROTATION') {
-					activeItems.heavyRotation = 5.0; // 5초간 화력 집중!
-					activePrint = { text: "HEAVY-ROTATION!", timer: 2.0 };
+						activeItems.heavyRotation = 5.0;
+						scrollingTexts.push({ lines: ["HEAVY-ROTATION!"], x: GAME_WIDTH / 2, y: it.y, speed: currentEnemySpeed, opacity: 1 });
 					}
-					
 					else if (it.val === 'TIME_STOP') {
-					activeItems.timeStop = 5.0; // 느긋하게 요리할 수 있는 5초!
-					activePrint = { text: "RED-LIGHT SPECIAL!", timer: 2.0 };
+						activeItems.timeStop = 5.0;
+						scrollingTexts.push({ lines: ["RED-LIGHT SPECIAL!"], x: GAME_WIDTH / 2, y: it.y, speed: currentEnemySpeed, opacity: 1 });
+					}
+					else if (it.val === 'PENETRATION') {
+						activeItems.penetration = 15.0;
+						scrollingTexts.push({ lines: ["관통 탄환 장전!"], x: GAME_WIDTH / 2, y: it.y, speed: currentEnemySpeed, opacity: 1 });
 					}
 					
-					else if (it.val === 'PENETRATION') {
-					activeItems.penetration = 15.0;
-					activePrint = { text: "관통 탄환 장전!", timer: 2.0 };
-					}
-                    
-                    SoundManager.playItemGet('special'); // 뿅! 하는 소리도 잊지 말고
-                    items.splice(i, 1);                  // 박스는 먹었으니 지워줌
-                    continue;                            // 다음 아이템 검사로 넘어감
-                }
+					SoundManager.playItemGet('special');
+					items.splice(i, 1);
+					continue;
+				}
 			
                 if (!(player.expr === "" && it.type === 'sym')) { 
                     updateExpression(it.val); 
@@ -759,6 +813,39 @@ function draw() {
     ctx.fillStyle = '#000'; ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
     drawStars();
     ctx.strokeStyle = '#333'; ctx.lineWidth = 2; ctx.strokeRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+		
+	if (gameState === 'PLAY') {
+		// 하늘에서 내려오는 모든 스크롤 메시지 배열을 순회하네.
+		scrollingTexts.forEach(txt => {
+			ctx.save();
+			
+			// 부드러운 페이드아웃 효과를 위해 rgba에 txt.opacity를 적용했네!
+			ctx.fillStyle = `rgba(255, 255, 255, ${txt.opacity})`; 
+			ctx.font = 'bold 22px Courier New';
+			ctx.textAlign = 'center';
+			ctx.textBaseline = 'middle';
+			
+			// 적이나 자원 위에 겹쳐도 잘 보이도록 검은색 테두리(그림자) 떡칠 계승!
+			ctx.shadowColor = `rgba(0, 0, 0, ${txt.opacity})`;
+			ctx.shadowBlur = 10;
+			ctx.lineWidth = 4;
+			ctx.strokeStyle = `rgba(0, 0, 0, ${txt.opacity})`;
+
+			let lineHeight = 30; // 자네가 설정한 줄 간격 30픽셀 그대로 유지!
+			
+			// [멀티라인 핵심 보존] 스폰할 때 이미 쪼개둔 lines 배열을 돌며 차례대로 그리네.
+			txt.lines.forEach((line, index) => {
+				// 정지된 startY 대신, 실시간으로 낙하하는 txt.y를 기준으로 줄 간격을 계산하네!
+				let currentY = txt.y + (index * lineHeight);
+				
+				ctx.strokeText(line, GAME_WIDTH / 2, currentY);
+				ctx.fillText(line, GAME_WIDTH / 2, currentY);
+			});
+			
+			ctx.restore();
+		});
+	}	
+	
     if (gameState === 'LEADERBOARD' || gameState === 'UPLOADING') {
         ctx.save(); ctx.fillStyle = '#0f0'; ctx.font = 'bold 40px Courier New'; ctx.textAlign = 'center';
         ctx.fillText("GLOBAL RANKING", GAME_WIDTH/2, 100); ctx.fillStyle = '#fff'; ctx.font = '24px Courier New';
@@ -887,40 +974,6 @@ function draw() {
             ctx.save(); if (!isDragging && gameState === 'PLAY') ctx.globalAlpha = 0.3; ctx.translate(player.x, player.y); ctx.fillStyle = '#0ff'; ctx.beginPath(); ctx.moveTo(0, -30); ctx.lineTo(-20, 20); ctx.lineTo(0, 10); ctx.lineTo(20, 20); ctx.closePath(); ctx.fill(); ctx.restore();
         }
         particles.forEach(p => { ctx.save(); ctx.globalAlpha = p.life; if (p.type === 'text') { ctx.translate(p.x, p.y); ctx.fillStyle = p.color; ctx.font = (p.isCritical?'bold 40px':'30px') + ' Courier New'; ctx.textAlign = 'center'; ctx.fillText(p.text, 0, 0); } else if (p.type === 'spark') { ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI*2); ctx.fill(); } else if (p.type === 'shockwave' || p.type === 'shockwave_visual') { ctx.strokeStyle = p.color; ctx.lineWidth = 5 * p.life; ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI*2); ctx.stroke(); } ctx.restore(); });
-		
-		// [STEP 4] PRINT 이벤트 텍스트 렌더링 (멀티 라인 지원으로 업그레이드)
-        if (activePrint && gameState === 'PLAY') {
-            ctx.save();
-            ctx.fillStyle = '#fff'; // 라디오 터미널 감성의 네온 그린
-            ctx.font = 'bold 22px Courier New';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            
-            // 적이나 총알 위에 글씨가 겹쳐도 잘 보이도록 검은색 테두리(그림자) 떡칠
-            ctx.shadowColor = '#000';
-            ctx.shadowBlur = 10;
-            ctx.lineWidth = 4;
-            ctx.strokeStyle = '#000';
-
-            const printY = GAME_HEIGHT * 0.8; // 자네가 주문한 '화면 아래쪽 70% 지점'
-
-            // [로건의 수술] \n 기호를 기준으로 텍스트를 쪼개서 배열로 만드네.
-            // 엑셀에서 넘어온 텍스트 형태의 \\n 과 실제 줄바꿈 \n 을 모두 처리하는 안전장치.
-            let lines = String(activePrint.text).split(/\\n|\n/);
-            let lineHeight = 30; // 줄 간격 30픽셀
-            
-            // 텍스트가 여러 줄일 경우 위아래 밸런스를 맞추기 위해 시작 Y좌표를 끌어올림.
-            let startY = printY - ((lines.length - 1) * lineHeight) / 2;
-
-            // 쪼개진 텍스트 배열을 돌면서 줄 간격만큼 아래로 내리며 그리네.
-            lines.forEach((line, index) => {
-                let currentY = startY + (index * lineHeight);
-                ctx.strokeText(line, GAME_WIDTH / 2, currentY);
-                ctx.fillText(line, GAME_WIDTH / 2, currentY);
-            });
-            
-            ctx.restore();
-        }	
 		
         ctx.restore();
     }

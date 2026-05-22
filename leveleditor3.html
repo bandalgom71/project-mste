@@ -107,6 +107,14 @@ function parseData() {
             currentLevel.spawnList.push({ row: currentRowOffset, type: 'NUMBER', val: val });
             return;
         }
+		
+		if (firstCell.toUpperCase().startsWith('FORCE|')) {
+            let content = firstCell.substring(6).trim();
+            let val = content.split(',').map(n => parseInt(n.trim()));
+            currentLevel.spawnList.push({ row: currentRowOffset, type: 'FORCE', val: val });
+            return;
+        }
+		
         if (firstCell.toUpperCase().startsWith('PRINT|')) {
             // 정규식으로 "텍스트"와 숫자 분리
             let match = firstCell.match(/PRINT\|"([^"]+)"\|([\d.]+)/);
@@ -229,7 +237,7 @@ function parseData() {
                     line += `, col: ${unit.col}, val: '${unit.val}'`;				
                 } else if (unit.type === 'SYMBOL') {
                     line += `, val: [${unit.val.map(s => `'${s}'`).join(', ')}]`;
-                } else if (unit.type === 'NUMBER') {
+                } else if (unit.type === 'NUMBER' || unit.type === 'FORCE') {
                     line += `, val: [${unit.val.join(', ')}]`;
                 } else {
                     line += `, val: ${unit.val}`;
