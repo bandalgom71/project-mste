@@ -4,23 +4,43 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="robots" content="noindex, nofollow">
-    <title>MSTE v8.2 - 7 Grid System (Safe Rollback)</title>
+    <title>MSTE v9.0</title>
     
     <script src="stages.js"></script>
 
     <style>
-        body { margin: 0; overflow: hidden; background-color: #222; touch-action: none; user-select: none; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: 'Courier New', monospace; }
+	
+		@font-face {
+			font-family: 'Neo Dunggeunmo';
+			src: url('https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_2001@1.3/NeoDunggeunmo.woff') format('woff');
+			font-weight: normal;
+			font-style: normal;
+		}
+        body { margin: 0; overflow: hidden; background-color: #222; touch-action: none; user-select: none; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: 'Neo Dunggeunmo', monospace; }
         canvas { display: block; box-shadow: 0 0 20px rgba(0, 255, 0, 0.2); background-color: #000; }
         #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; display: flex; flex-direction: column; justify-content: center; align-items: center; }
         #message-box { text-align: center; color: #0f0; text-shadow: 0 0 10px #000; pointer-events: auto; cursor: pointer; }
-        h1 { font-size: 32x; margin-bottom: 20px; text-shadow: 0 0 20px #0f0; }
-		#main-title { font-size: 32px !important; }
+        h1 { font-size: 40x; margin-bottom: 20px; text-shadow: 0 0 20px #0f0; }
+		#main-title { font-size: 40px !important; }
         p { font-size: 20px; animation: blink 1s infinite; }
         @keyframes blink { 50% { opacity: 0; } }
         #highscore-input { background: rgba(0, 0, 0, 0.9); border: 2px solid #0f0; padding: 20px; text-align: center; pointer-events: auto; box-shadow: 0 0 20px #0f0; z-index: 10; }
-        #initials { background: #000; border: none; border-bottom: 2px solid #fff; color: #fff; font-family: 'Courier New', monospace; font-size: 30px; text-align: center; width: 260px; text-transform: uppercase; outline: none; }
-        #submit-btn { display: block; margin: 20px auto 0; padding: 10px 20px; background: #0f0; color: #000; border: none; font-weight: bold; font-size: 18px; cursor: pointer; }
-        .hidden { display: none !important; }
+        #initials { background: #000; border: none; border-bottom: 2px solid #fff; color: #fff; font-family: 'Neo Dunggeunmo', monospace; font-size: 30px; text-align: center; width: 260px; text-transform: uppercase; outline: none; }
+  		#submit-btn { 
+			display: block; 
+			margin: 20px auto 0; 
+			padding: 10px 20px; 
+			background: #0f0; 
+			color: #000; 
+			border: none; 
+			cursor: pointer; 
+			font-family: 'Neo Dunggeunmo', monospace; 
+
+			font-size: 22px;          /* 18px에서 22px로 텍스트 체급 업! */
+			letter-spacing: 2px;     /* 글자 사이를 4픽셀씩 벌려 좌우 여백을 꽉 채우네 */
+			text-indent: 2px;        /* [로건의 팁] 자간을 벌리면 맨 오른쪽 글자 뒤도 늘어나서 약간 왼쪽으로 쏠리니, 들여쓰기로 완벽하게 중앙 정렬을 맞추네! */
+		}		
+		.hidden { display: none !important; }
     </style>
 </head>
 <body>
@@ -1017,7 +1037,7 @@ function draw() {
 			
 			// 부드러운 페이드아웃 효과를 위해 rgba에 txt.opacity를 적용했네!
 			ctx.fillStyle = `rgba(255, 255, 255, ${txt.opacity})`; 
-			ctx.font = 'bold 22px Courier New';
+			ctx.font = '22px "Neo Dunggeunmo"';
 			ctx.textAlign = 'center';
 			ctx.textBaseline = 'middle';
 			
@@ -1043,11 +1063,11 @@ function draw() {
 	}	
 	
     if (gameState === 'LEADERBOARD' || gameState === 'UPLOADING') {
-        ctx.save(); ctx.fillStyle = '#0f0'; ctx.font = 'bold 40px Courier New'; ctx.textAlign = 'center';
-        ctx.fillText("GLOBAL RANKING", GAME_WIDTH/2, 100); ctx.fillStyle = '#fff'; ctx.font = '24px Courier New';
+        ctx.save(); ctx.fillStyle = '#0f0'; ctx.font = 'bold 40px "Neo Dunggeunmo"'; ctx.textAlign = 'center';
+        ctx.fillText("GLOBAL RANKING", GAME_WIDTH/2, 100); ctx.fillStyle = '#fff'; ctx.font = '24px "Neo Dunggeunmo"';
         ctx.fillText(`YOUR SCORE: ${score}`, GAME_WIDTH/2, 150);
-        if (gameState === 'UPLOADING') { ctx.fillStyle = '#ff0'; ctx.font = '30px Courier New'; ctx.fillText("UPLOADING TO SERVER...", GAME_WIDTH/2, GAME_HEIGHT/2); } 
-        else if (isFetching) { ctx.fillStyle = '#ff0'; ctx.font = '30px Courier New'; ctx.fillText("FETCHING DATA...", GAME_WIDTH/2, GAME_HEIGHT/2); } 
+        if (gameState === 'UPLOADING') { ctx.fillStyle = '#ff0'; ctx.font = '30px "Neo Dunggeunmo"'; ctx.fillText("UPLOADING TO SERVER...", GAME_WIDTH/2, GAME_HEIGHT/2); } 
+        else if (isFetching) { ctx.fillStyle = '#ff0'; ctx.font = '30px "Neo Dunggeunmo"'; ctx.fillText("FETCHING DATA...", GAME_WIDTH/2, GAME_HEIGHT/2); } 
         else {
             ctx.textAlign = 'left'; let startY = 220;
 			
@@ -1099,7 +1119,7 @@ function draw() {
     }
     if (gameState === 'PLAY' || gameState === 'TRANSITION' || gameState === 'FAIL' || gameState === 'INPUT' || gameState === 'CRASHED') {
         ctx.save(); if (gameState === 'INPUT' || gameState === 'CRASHED') ctx.globalAlpha = (gameState === 'CRASHED' ? 1.0 : 0.3);
-        ctx.fillStyle = '#fff'; ctx.font = 'bold 24px Courier New'; ctx.textAlign = 'left'; ctx.fillText(`LV: ${currentLevel}`, 20, 30);
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 24px "Neo Dunggeunmo"'; ctx.textAlign = 'left'; ctx.fillText(`LV: ${currentLevel}`, 20, 30);
         ctx.textAlign = 'center'; ctx.fillText(`SCORE: ${score}`, GAME_WIDTH / 2, 30); ctx.textAlign = 'right'; ctx.fillStyle = '#f00';
         let hearts = "♥".repeat(Math.max(0, lives)); ctx.fillText(`LIVES: ${hearts}`, GAME_WIDTH - 20, 30);
 		
@@ -1126,7 +1146,7 @@ function draw() {
 
 				// 2. 결정된 설정으로 텍스트를 그리네
 				ctx.fillStyle = color;
-				ctx.font = 'bold 18px Courier New';
+				ctx.font = 'bold 18px "Neo Dunggeunmo"';
 				ctx.textAlign = 'right';
 				
 				// 소수점 두 자리까지 출력해서 긴박함을 유지하지!
@@ -1147,13 +1167,13 @@ function draw() {
             if (it.type === 'num') {
                 // 숫자 아이템 (일반은 노란색, 파편은 주황색)
                 ctx.fillStyle = (it.isDebris ? '#ffa500' : '#ff0');
-                ctx.font = (it.isDebris ? 'bold 20px' : 'bold 24px') + ' Courier New';
+                ctx.font = (it.isDebris ? 'bold 20px' : 'bold 24px') + ' "Neo Dunggeunmo"';
                 ctx.fillText(it.val, 0, 0);
 
             } else if (it.type === 'sym') {
                 // 부호 아이템 (초록색)
                 ctx.fillStyle = '#0f0';
-                ctx.font = 'bold 24px Courier New';
+                ctx.font = 'bold 24px "Neo Dunggeunmo"';
                 ctx.fillText(it.val, 0, 0);
 
             } else if (it.type === 'special') {
@@ -1198,10 +1218,10 @@ function draw() {
 
             // 2. 적의 HP 숫자 출력 (기존 코드 유지)
             ctx.fillStyle = '#fff'; 
-            ctx.font = '30px Courier New'; 
+            ctx.font = '30px "Neo Dunggeunmo"'; 
             ctx.textAlign = 'center'; 
             ctx.textBaseline='middle'; 
-            ctx.fillText(en.hp > 0 ? en.hp : "", en.x + en.width/2, en.y + en.height/2); 
+            ctx.fillText(en.hp > 0 ? en.hp : "", en.x + en.width/2, en.y + en.height/2 + 2); 
         });
 		
         bullets.forEach(b => { 
@@ -1212,7 +1232,7 @@ function draw() {
             // === [로건의 가시성 폴리싱: 순백색 탄환 + 검은색 테두리 그림자] ===
             // 총알 글씨 자체는 요청하신 눈부신 흰색(#fff)으로 채우고!
             ctx.fillStyle = '#fff'; 
-            ctx.font = 'bold 22px Courier New'; // 가독성을 위해 bold 처리하고 크기도 슬쩍 키웠네.
+            ctx.font = 'bold 22px "Neo Dunggeunmo"'; // 가독성을 위해 bold 처리하고 크기도 슬쩍 키웠네.
             ctx.textAlign = 'center'; 
             ctx.textBaseline = 'middle';
 
@@ -1227,7 +1247,7 @@ function draw() {
         });
 		
 		if (gameState !== 'CRASHED' && gameState !== 'FAIL' && gameState !== 'GAMEOVER') {
-			if (player.expr !== "") { ctx.save(); ctx.font = 'bold 40px Courier New'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; ctx.shadowColor = '#0f0'; ctx.shadowBlur = 10; ctx.fillStyle = '#fff'; ctx.fillText(player.expr, GAME_WIDTH / 2, GAME_HEIGHT - 20); ctx.restore(); }
+			if (player.expr !== "") { ctx.save(); ctx.font = 'bold 40px "Neo Dunggeunmo"'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; ctx.shadowColor = '#0f0'; ctx.shadowBlur = 10; ctx.fillStyle = '#fff'; ctx.fillText(player.expr, GAME_WIDTH / 2, GAME_HEIGHT - 20); ctx.restore(); }
 			
 			ctx.save(); 
 			if (!isDragging && gameState === 'PLAY') ctx.globalAlpha = 0.7; 
@@ -1245,7 +1265,7 @@ function draw() {
 			
 			ctx.restore();
 		}
-        particles.forEach(p => { ctx.save(); ctx.globalAlpha = p.life; if (p.type === 'text') { ctx.translate(p.x, p.y); ctx.fillStyle = p.color; ctx.font = (p.isCritical?'bold 40px':'30px') + ' Courier New'; ctx.textAlign = 'center'; ctx.fillText(p.text, 0, 0); } else if (p.type === 'spark') { ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI*2); ctx.fill(); } else if (p.type === 'shockwave' || p.type === 'shockwave_visual') { ctx.strokeStyle = p.color; ctx.lineWidth = 5 * p.life; ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI*2); ctx.stroke(); } ctx.restore(); });
+        particles.forEach(p => { ctx.save(); ctx.globalAlpha = p.life; if (p.type === 'text') { ctx.translate(p.x, p.y); ctx.fillStyle = p.color; ctx.font = (p.isCritical?'bold 40px':'30px') + ' "Neo Dunggeunmo"'; ctx.textAlign = 'center'; ctx.fillText(p.text, 0, 0); } else if (p.type === 'spark') { ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI*2); ctx.fill(); } else if (p.type === 'shockwave' || p.type === 'shockwave_visual') { ctx.strokeStyle = p.color; ctx.lineWidth = 5 * p.life; ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI*2); ctx.stroke(); } ctx.restore(); });
 		
         ctx.restore();
     }
