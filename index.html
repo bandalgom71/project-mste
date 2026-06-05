@@ -517,6 +517,7 @@ window.addEventListener('touchend', () => {
     SoundManager.resume(); // 아이패드 터치 끝나는 순간 탄환 발사 및 사운드 유지!
     if(gameState==='PLAY' && isDragging) { isDragging = false; fireBullet(); }
 });
+
 window.addEventListener('keydown', function(e) {
     if (e.key === 'n' || e.key === 'N') {
         if (gameState === 'PLAY') { // 플레이 중일 때만 작동
@@ -535,23 +536,45 @@ window.addEventListener('keydown', function(e) {
         }
     }
 	
-	if ((e.key === 'z' || e.key === 'Z') && gameState === 'PLAY') {
-            console.log("🛠️ [DEBUG] 관제탑 권한으로 즉시 하이스코어 검증 및 게임오버 진입!");
-            document.body.style.cursor = 'default';
-            // 자네가 설계해 둔 게임오버 프로세스를 다이렉트로 가동하네!
-            fetchGlobalScores(); 
-            if (checkIsHighScore(score)) { 
-                gameState = 'INPUT'; 
-                messageBox.classList.add('hidden'); 
-                highscoreInput.classList.remove('hidden'); 
-                initialsField.value = ""; 
-                initialsField.focus(); 
-            } else { 
-                showLeaderboard(); 
-            }
+    if ((e.key === 'z' || e.key === 'Z') && gameState === 'PLAY') {
+        console.log("🛠️ [DEBUG] 관제탑 권한으로 즉시 하이스코어 검증 및 게임오버 진입!");
+        document.body.style.cursor = 'default';
+        // 자네가 설계해 둔 게임오버 프로세스를 다이렉트로 가동하네!
+        fetchGlobalScores(); 
+        if (checkIsHighScore(score)) { 
+            gameState = 'INPUT'; 
+            messageBox.classList.add('hidden'); 
+            highscoreInput.classList.remove('hidden'); 
+            initialsField.value = ""; 
+            initialsField.focus(); 
+        } else { 
+            showLeaderboard(); 
         }
+    } // ⬅️ [로건의 픽스] 기존에 있던 불필요한 '}' 1개를 제거하여 흐름을 이어가네!
 	
-});
+    if ((e.key === 'b' || e.key === 'B') && gameState === 'PLAY') {
+        console.log("🛠️ [DEBUG] 폭탄 치트키 발동! 필드를 완전히 청소하네.");
+        
+        // 1. 배열을 비우기 전에 화면에 있던 적들의 중심 좌표를 계산해서
+        // 우리가 애써 만든 화려한 폭발 이펙트를 사방으로 팡팡 터뜨려 주네!
+        enemies.forEach(en => {
+            let centerX = en.x + en.width / 2;
+            let centerY = en.y + en.height / 2;
+            // 기존 엔진 규격에 맞춰 미디움 급 폭발과 함께 "BOOM!" 텍스트를 띄우지.
+            spawnExplosion(centerX, centerY, 'medium', "BOOM!", 0, 1);
+        });
+
+        // 2. [핵심 처방] 적들을 담고 있는 가방(배열) 자체를 통째로 비워버리네!
+        // 우리 엔진에서 enemies는 let으로 선언되어 있어서 이 대입문 한 줄로 박스까지 싹 날아가지.
+        enemies = [];
+        
+        // 청각적 카타르시스를 위해 쾅- 하는 저음 폭발음도 관제탑 권한으로 강제 재생!
+        if (typeof SoundManager !== 'undefined' && SoundManager.playBassExplosion) {
+            SoundManager.playBassExplosion(0);
+        }
+    }
+}); // ⬅️ [로건의 픽스] 마감 괄호를 원래의 규격인 '});'로 안전하게 복구했네!
+
 window.addEventListener('mousemove', e => updatePlayerPos(e.clientX, e.clientY));
 window.addEventListener('touchmove', e => { e.preventDefault(); updatePlayerPos(e.touches[0].clientX, e.touches[0].clientY); }, { passive: false });
 
@@ -810,7 +833,7 @@ function update(dt) {
             // [안전장치] currentSymbols에 데이터가 있을 때만 실행!
             if (currentSymbols.length > 0) {
                 // ▼ 여기서 Easy-Busy 체크! 활성화 중이면 '+', '×'만 들어있는 임시 배열(Pool)을 사용하네.
-                let symPool = (activeItems.easyBusy > 0) ? ['+', '×'] : currentSymbols;
+                let symPool = (activeItems.easyBusy > 0) ? ['×'] : currentSymbols;
                 
                 // === [로건의 결정론적 순환 스폰 수술] ===
                 // 1. 혹시 스테이지가 바뀌어서 배열 크기보다 인덱스가 커졌을 상황을 대비한 안전장치!
@@ -851,7 +874,7 @@ function update(dt) {
 			
 				if (it.type === 'special') {
 					if (it.val === 'EASY_BUSY') {
-						activeItems.easyBusy = 5.0;
+						activeItems.easyBusy = 10.0;
 						// activePrint를 지우고, 흐르는 텍스트 배열에 직접 주입하네!
 						scrollingTexts.push({ lines: ["EASY-BUSY!"], x: GAME_WIDTH / 2, y: it.y, speed: currentEnemySpeed, opacity: 1 });
 						
@@ -1173,7 +1196,7 @@ function draw() {
             } else if (it.type === 'sym') {
                 // 부호 아이템 (초록색)
                 ctx.fillStyle = '#0f0';
-                ctx.font = 'bold 24px "Neo Dunggeunmo"';
+                ctx.font = '40px "Neo Dunggeunmo"';
                 ctx.fillText(it.val, 0, 0);
 
             } else if (it.type === 'special') {
