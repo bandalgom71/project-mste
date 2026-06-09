@@ -128,12 +128,30 @@ const SoundManager = {
     isMuted: false,
     tracks: ['test_bgm_01.mp3', 'test_bgm_02.mp3', 'test_bgm_03.mp3', 'test_bgm_04.mp3'],
     
-    init: function() {
+	init: function() {
         if (this.ctx) return;
         window.AudioContext = window.AudioContext || window.webkitAudioContext;
         this.ctx = new AudioContext();
         this.masterGain = this.ctx.createGain();
         this.masterGain.connect(this.ctx.destination);
+        
+        // 🔥 [로건의 사파리 Web Audio API 강제 언록 픽스]
+        // 오디오 엔진을 만들자마자 즉시 깨우고, 사파리가 딴소리 못 하게 무음 주파수를 한번 튕겨주네!
+        if (this.ctx.state === 'suspended') {
+            this.ctx.resume();
+        }
+        try {
+            const dummyOsc = this.ctx.createOscillator();
+            const dummyGain = this.ctx.createGain();
+            dummyGain.gain.setValueAtTime(0, this.ctx.currentTime); // 완전 무음 처리
+            dummyOsc.connect(dummyGain);
+            dummyGain.connect(this.ctx.destination);
+            dummyOsc.start(0);
+            dummyOsc.stop(0.01); // 0.01초간 가짜 신호를 흘려 클럭을 동기화하네.
+        } catch(e) {
+            console.log("AudioContext Safari warm-up bypass", e);
+        }
+
         this.createRadioStatic();
         
         // [iOS 사파리 락 해제 핵심] 싱글톤 오디오 객체를 첫 터치 순간에 미리 단 하나만 생성해둔다네.
@@ -148,9 +166,19 @@ const SoundManager = {
     resume: function() {
         if (this.ctx && this.ctx.state === 'suspended') {
             this.ctx.resume();
+            
+            // 🔥 [로건의 사파리 2중 방벽] 
+            // 플레이 도중 혹시라도 사파리가 다시 오디오를 재울 것을 대비해, 깨울 때도 무음 파형을 쏴주네.
+            try {
+                const osc = this.ctx.createOscillator();
+                const g = this.ctx.createGain();
+                g.gain.setValueAtTime(0, this.ctx.currentTime);
+                osc.connect(g); g.connect(this.ctx.destination);
+                osc.start(0); osc.stop(0.01);
+            } catch(e){}
         }
     },
-    
+	
     createRadioStatic: function() {
         if (!this.ctx) return;
         const bufferSize = 2 * this.ctx.sampleRate; 
