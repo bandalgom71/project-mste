@@ -341,8 +341,9 @@ function checkIsHighScore(finalScore) { if (globalScores.length < 20) return tru
 fetchGlobalScores();
 
 // --- GAME OBJECTS ---
-const playerImg = new Image();
-playerImg.src = 'assets/playership.png';
+const playerImgIdle = new Image();   playerImgIdle.src = 'assets/playership_idle.png';
+const playerImgFlame1 = new Image();  playerImgFlame1.src = 'assets/playership_flame1.png';
+const playerImgFlame2 = new Image();  playerImgFlame2.src = 'assets/playership_flame2.png';
 const player = { x: GAME_WIDTH / 2, y: GAME_HEIGHT - 150, width: 40, height: 40, expr: "" };
 let bullets = [], enemies = [], items = [], particles = [];
 let enemySpawnData = [];
@@ -518,7 +519,7 @@ function resetStage() {
     currentNumbers = [];
 	scrollingTexts = [];
     enemySpawnData = generateLevel(currentLevel);
-    lastTime = performance.now(); isDragging = true;
+    lastTime = performance.now(); 
 }
 function showLevelClearScreen() { gameState = 'TRANSITION'; currentLevel++; messageBox.classList.remove('hidden'); mainTitle.innerText = "STAGE CLEAR!"; subText.innerText = `[ CLICK FOR LEVEL ${currentLevel} ]`; subText.style.color = '#fff'; }
 function triggerStageFail() { gameState = 'FAIL'; messageBox.classList.remove('hidden'); mainTitle.innerText = "DEFENSE FAILED!"; subText.innerText = "RESTARTING STAGE..."; subText.style.color = '#f50'; SoundManager.stopBGM(); setTimeout(() => { resetStage(); }, 2000); }
@@ -603,7 +604,43 @@ window.addEventListener('keydown', function(e) {
     }
 }); // ⬅️ [로건의 픽스] 마감 괄호를 원래의 규격인 '});'로 안전하게 복구했네!
 
-window.addEventListener('mousemove', e => updatePlayerPos(e.clientX, e.clientY));
+window.addEventListener('mousemove', e => {
+    if (gameState !== 'PLAY') return; //
+
+    // 1. 브라우저의 실제 물리 버튼 클릭 상태를 실시간 확인하네.
+    const isMouseReallyPressed = (e.buttons === 1);
+    isDragging = isMouseReallyPressed; //
+
+    let 계산X = e.clientX;
+    let 계산Y = e.clientY;
+
+    // 2. [마우스 포인터 제어]: 오직 버튼다운(조작 중) 상태일 때만 마우스 포인터를 가상의 벽에 가두네!
+    if (isDragging) { //
+        const canvasMinX = canvasOffsetX;
+        const canvasMaxX = canvasOffsetX + GAME_WIDTH * scale;
+        const canvasMaxY = canvasOffsetY + GAME_HEIGHT * scale;
+
+        계산X = Math.max(canvasMinX + 10, Math.min(canvasMaxX - 10, e.clientX));
+        계산Y = Math.min(canvasMaxY - 10, e.clientY); // 하단 바 탈출 차단!
+    } 
+    // ※ 버튼업 상태일 때는 계산X, 계산Y에 브라우저 원본 좌표를 그대로 흘려보내서 자유 탈출을 허용하네!
+
+    // 3. 가두거나 풀어준 마우스 좌표를 게임 내부 좌표계로 치환하네.
+    const pos = getGameCoordinates(계산X, 계산Y); //
+    player.x = Math.max(30, Math.min(GAME_WIDTH - 30, pos.x)); //
+    
+    // 4. [기체 제어 - 밀착 알고리즘 전면 적용]: 버튼다운이든 업이든 비행기는 무조건 바닥 끝까지 내려가야 하네!
+    let targetY = pos.y - 150;
+    if (pos.y > GAME_HEIGHT - 120) {
+        // 마우스가 하단 120px 구역으로 들어오면 비행기를 바닥 쪽으로 자석처럼 찰칵 밀착시키네.
+        let ratio = (pos.y - (GAME_HEIGHT - 120)) / 120;
+        targetY = (pos.y - 150) + (120 * ratio);
+    }
+    
+    // 최종적으로 비행기가 화면 밑바닥(GAME_HEIGHT - 30)을 완전히 긁고 다닐 수 있게 리미트를 통일했네!
+    player.y = Math.max(50, Math.min(GAME_HEIGHT - 30, targetY)); 
+});
+
 window.addEventListener('touchmove', e => { e.preventDefault(); updatePlayerPos(e.touches[0].clientX, e.touches[0].clientY); }, { passive: false });
 
 function updatePlayerPos(clientX, clientY) {
@@ -893,7 +930,7 @@ function update(dt) {
             it.y += it.vy * dt;
             it.vy += 200 * dt;
         } else {
-			let speedBoost = (activeItems.easyBusy > 0) ? 2.5 : 1.0;
+			let speedBoost = (activeItems.easyBusy > 0) ? 1.0 : 1.0;
             it.y += (it.speed * speedBoost) * dt;
         }
 
@@ -1296,26 +1333,34 @@ function draw() {
             ctx.fillText(b.text, 0, 0); 
             ctx.restore(); 
         });
-		
+				
 		if (gameState !== 'CRASHED' && gameState !== 'FAIL' && gameState !== 'GAMEOVER') {
 			if (player.expr !== "") { ctx.save(); ctx.font = 'bold 40px "Neo Dunggeunmo"'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; ctx.shadowColor = '#0f0'; ctx.shadowBlur = 10; ctx.fillStyle = '#fff'; ctx.fillText(player.expr, GAME_WIDTH / 2, GAME_HEIGHT - 20); ctx.restore(); }
-			
+
 			ctx.save(); 
-			if (!isDragging && gameState === 'PLAY') ctx.globalAlpha = 0.7; 
-			
-			ctx.translate(player.x, player.y); 
-			
-			// [로건의 안전벨트] 이미지가 완벽히 로딩 완료(complete)되었을 때만 그리도록 제어하네!
-			if (playerImg.complete && playerImg.naturalWidth !== 0) {
-				ctx.drawImage(playerImg, -30, -30, 60, 60); 
+			if (!isDragging && gameState === 'PLAY') ctx.globalAlpha = 0.7;
+
+			ctx.translate(player.x, player.y);
+
+			// 🔥 [로건의 핀포인트 2]: 마우스 드래그 상태에 따라 실시간으로 이미지를 스위칭하네!
+			let currentImg = playerImgIdle; // 마우스를 뗐을 땐 불꽃 없는 대기 상태
+
+			if (isDragging && gameState === 'PLAY') {
+				// 150ms 단위로 0과 1을 진동시켜 불꽃 A, B를 번갈아 출력하네.
+				let frame = Math.floor(elapsedTime / 40) % 2;
+				currentImg = (frame === 0) ? playerImgFlame1 : playerImgFlame2;
+			}
+
+			if (currentImg.complete && currentImg.naturalWidth !== 0) {
+				ctx.drawImage(currentImg, -30, -30, 60, 60);
 			} else {
-				// 혹시라도 이미지가 0.1초 늦게 뜰 때를 대비해, 로딩 중엔 임시로 원래 사각형이라도 그리게 백업해 두었네.
-				ctx.fillStyle = '#0ff';
+				ctx.fillStyle = '#444'; // 그레이스케일 감성에 맞는 임시 박스 백업
 				ctx.fillRect(-20, -20, 40, 40);
 			}
-			
+
 			ctx.restore();
 		}
+		
         particles.forEach(p => { ctx.save(); ctx.globalAlpha = p.life; if (p.type === 'text') { ctx.translate(p.x, p.y); ctx.fillStyle = p.color; ctx.font = (p.isCritical?'bold 40px':'30px') + ' "Neo Dunggeunmo"'; ctx.textAlign = 'center'; ctx.fillText(p.text, 0, 0); } else if (p.type === 'spark') { ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI*2); ctx.fill(); } else if (p.type === 'shockwave' || p.type === 'shockwave_visual') { ctx.strokeStyle = p.color; ctx.lineWidth = 5 * p.life; ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI*2); ctx.stroke(); } ctx.restore(); });
 		
         ctx.restore();
