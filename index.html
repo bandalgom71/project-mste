@@ -829,26 +829,35 @@ function update(dt) {
                 }
 				
 			} else {
-                // 적 소환 (currentEnemySpeed 적용)
-                let width = data.isBoss ? 150 : ENEMY_WIDTH; 
-                let height = data.isBoss ? 100 : ENEMY_HEIGHT;
+				// 적 소환 (currentEnemySpeed 적용)
+				let width = data.isBoss ? 150 : ENEMY_WIDTH; 
+				let height = data.isBoss ? 100 : ENEMY_HEIGHT;
 
-                // [로건의 수술] 이제 진짜 방패병의 데이터(isCriticalOnly)를 객체에 주입하네!
-                enemies.push({ 
-                    x: data.x - width/2, 
-                    y: -80, 
-                    width, 
-                    height, 
-                    hp: data.hp, 
-                    maxHp: data.hp, 
-                    speed: currentEnemySpeed, 
-                    color: data.isBoss ? '#f00' : '#fff', 
-                    isBoss: data.isBoss,
-                    // 이 줄이 추가되어야 충돌 판정 루프에서 "en.isCriticalOnly"를 인식할 수 있어
-                    isCriticalOnly: data.isCriticalOnly || false 
-                });
-            }
-            
+				if (!data.isBoss) {
+					// 체력 숫자의 길이를 측정하네 (예: 99999는 5자리, 100000은 6자리)
+					const hpLength = String(data.hp).length;
+					
+					// 💡 [로건의 6자리 가드 패치]: 5자리(99999)까지는 완벽하게 순정 폭(80)을 유지하네!
+					// 숫자가 6자리가 되는 순간부터 자릿수가 늘어날 때마다 가로폭을 25픽셀씩 시원하게 늘려주네.
+					// (6자리일 때 폭 105px, 7자리일 때 폭 130px로 웅장하게 벌크업!)
+					if (hpLength >= 6) {
+						width = ENEMY_WIDTH + (hpLength - 5) * 25;
+					}
+				}
+
+				enemies.push({ 
+					x: data.x - width/2, 
+					y: -80, 
+					width, // 👈 6자리 이상일 때만 벌크업된 가로폭이 드로잉과 히팅박스에 자동 연동되네!
+					height, 
+					hp: data.hp, 
+					maxHp: data.hp, 
+					speed: currentEnemySpeed, 
+					color: data.isBoss ? '#f00' : '#fff', 
+					isBoss: data.isBoss,
+					isCriticalOnly: data.isCriticalOnly || false 
+				});
+			}          
             enemySpawnData.splice(i, 1);
         }
     }
@@ -939,9 +948,9 @@ function update(dt) {
 			
 				if (it.type === 'special') {
 					if (it.val === 'EASY_BUSY') {
-						activeItems.easyBusy = 10.0;
+						activeItems.easyBusy = 10.0;	
 						// activePrint를 지우고, 흐르는 텍스트 배열에 직접 주입하네!
-						scrollingTexts.push({ lines: ["EASY-BUSY!"], x: GAME_WIDTH / 2, y: it.y, speed: currentEnemySpeed, opacity: 1 });
+						// scrollingTexts.push({ lines: ["EASY-BUSY!"], x: GAME_WIDTH / 2, y: it.y, speed: currentEnemySpeed, opacity: 1 });
 						
 						items.forEach(existingItem => {
 							if (existingItem.type === 'num' && !existingItem.isDebris) existingItem.val = 10;
@@ -1009,7 +1018,7 @@ function update(dt) {
             let en = enemies[j];
             
             // 1. 총알과 적의 기본 충돌 검사
-            if (b.x > en.x && b.x < en.x + en.width && b.y > en.y && b.y < en.y + en.height) {
+            if (b.x > en.x - 5 && b.x < en.x + en.width + 5 && b.y > en.y && b.y < en.y + en.height) {
                 
                 // ▼▼▼ [NEW 1] 이미 때린 적은 명부(HitList)를 보고 무시! ▼▼▼
                 if (b.isPiercing && b.hitList.has(en)) {
@@ -1042,7 +1051,9 @@ function update(dt) {
                 let actualDmg = Math.min(en.hp, dmg);
                 
                 if (isCrit) {
-                    spawnDebris(en.x + en.width/2, en.y + en.height/2, en.hp);
+					if (en.isBoss) {
+						spawnDebris(en.x + en.width/2, en.y + en.height/2, en.hp);
+					}
                 }
 
                 score += actualDmg;
@@ -1100,7 +1111,7 @@ function update(dt) {
 							let actualDmg = Math.min(en.hp, p.damage);
                             score += actualDmg * p.multiplier; en.hp -= p.damage; p.hitList.push(en);
                             if (en.hp <= 0) {
-                                if (isStrictCrit) spawnDebris(en.x + en.width/2, en.y + en.height/2, p.damage);
+                                if (isStrictCrit && en.isBoss) spawnDebris(en.x + en.width/2, en.y + en.height/2, p.damage);
                                 spawnExplosion(en.x + en.width/2, en.y + en.height/2, isStrictCrit ? 'critical' : 'medium', isStrictCrit ? "CHAIN!" : p.damage, p.damage, p.multiplier + 1);
 								if (en.dropItem) { items.push({ type: 'special', val: en.dropItem, x: en.x + en.width/2, y: en.y + en.height/2, speed: 150 }); }
                                 enemies.splice(j, 1);
