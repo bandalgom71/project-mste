@@ -17,29 +17,59 @@
 			font-style: normal;
 		}
         body { margin: 0; overflow: hidden; background-color: #222; touch-action: none; user-select: none; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: 'Neo Dunggeunmo', monospace; }
-        canvas { display: block; box-shadow: 0 0 20px rgba(0, 255, 0, 0.2); background-color: #000; }
+        canvas { display: block; box-shadow: 0 0 20px rgba(170, 170, 170, 0.15); background-color: #000; }
         #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; display: flex; flex-direction: column; justify-content: center; align-items: center; }
-        #message-box { text-align: center; color: #0f0; text-shadow: 0 0 10px #000; pointer-events: auto; cursor: pointer; }
-        h1 { font-size: 40x; margin-bottom: 20px; text-shadow: 0 0 20px #0f0; }
-		#main-title { font-size: 40px !important; }
+        #message-box { 
+			text-align: center; 
+			color: #ffffff; 
+			text-shadow: 0 0 15px rgba(255, 255, 255, 0.6), 0 0 5px rgba(0, 0, 0, 0.9); 
+			pointer-events: auto; 
+			cursor: pointer; 
+		}
+        h1 { font-size: 40px; margin-bottom: 20px; text-shadow: 0 0 20px rgba(255, 255, 255, 0.5); }
+		#main-title { font-size: 40px !important; color: #ffffff; }
         p { font-size: 20px; animation: blink 1s infinite; }
         @keyframes blink { 50% { opacity: 0; } }
-        #highscore-input { background: rgba(0, 0, 0, 0.9); border: 2px solid #0f0; padding: 20px; text-align: center; pointer-events: auto; box-shadow: 0 0 20px #0f0; z-index: 10; }
-        #initials { background: #000; border: none; border-bottom: 2px solid #fff; color: #fff; font-family: 'Neo Dunggeunmo', monospace; font-size: 30px; text-align: center; width: 260px; text-transform: uppercase; outline: none; }
+		/* 🔥 [로건의 느와르 UI 패치]: 초록 테두리와 발광 효과를 차분한 연회색 네온으로 정화하네! */
+        #highscore-input { 
+            background: rgba(0, 0, 0, 0.9); 
+            border: 2px solid #aaaaaa; 
+            padding: 20px; 
+            text-align: center; 
+            pointer-events: auto; 
+            box-shadow: 0 0 20px rgba(170, 170, 170, 0.6); 
+            z-index: 10; 
+        }
+        
+        /* 💡 순정 흑백 모노톤 상태를 완벽하게 유지하네 */
+        #initials { 
+            background: #000; 
+            border: none; 
+            border-bottom: 2px solid #fff; 
+            color: #fff; 
+            font-family: 'Neo Dunggeunmo', monospace; 
+            font-size: 30px; 
+            text-align: center; 
+            width: 260px; 
+            text-transform: uppercase; 
+            outline: none; 
+        }
+        
+        /* 🔥 [로건의 느와르 UI 패치]: 쨍하던 초록 버튼을 묵직한 연회색(#cccccc)으로 매핑 완료! */
   		#submit-btn { 
 			display: block; 
 			margin: 20px auto 0; 
 			padding: 10px 20px; 
-			background: #0f0; 
-			color: #000; 
+			background: #cccccc; 
+			color: #000000; 
 			border: none; 
 			cursor: pointer; 
 			font-family: 'Neo Dunggeunmo', monospace; 
 
-			font-size: 22px;          /* 18px에서 22px로 텍스트 체급 업! */
-			letter-spacing: 2px;     /* 글자 사이를 4픽셀씩 벌려 좌우 여백을 꽉 채우네 */
-			text-indent: 2px;        /* [로건의 팁] 자간을 벌리면 맨 오른쪽 글자 뒤도 늘어나서 약간 왼쪽으로 쏠리니, 들여쓰기로 완벽하게 중앙 정렬을 맞추네! */
-		}		
+			font-size: 22px;          /* 18px에서 22px로 텍스트 체급 업 보존! */
+			letter-spacing: 2px;     /* 글자 사이를 4픽셀씩 벌려 좌우 여백을 꽉 채우네 보존! */
+			text-indent: 2px;        /* 들여쓰기로 완벽하게 중앙 정렬을 맞추네 보존! */
+		}	
 		.hidden { display: none !important; }
     </style>
 </head>
@@ -52,7 +82,7 @@
     </div>
 
     <div id="highscore-input" class="hidden">
-        <h2 style="color:#ff0; margin-top:0;">NEW GLOBAL RECORD!</h2>
+        <h2 style="color:#ffffff; margin-top:0;">NEW GLOBAL RECORD!</h2>
         <p style="color:#fff;">ENTER INITIALS:</p>
         <input type="text" id="initials" maxlength="10" autocomplete="off">
         <button id="submit-btn">ENTER</button>
@@ -522,8 +552,8 @@ function resetStage() {
     lastTime = performance.now(); 
 }
 function showLevelClearScreen() { gameState = 'TRANSITION'; currentLevel++; messageBox.classList.remove('hidden'); mainTitle.innerText = "STAGE CLEAR!"; subText.innerText = `[ CLICK FOR LEVEL ${currentLevel} ]`; subText.style.color = '#fff'; }
-function triggerStageFail() { gameState = 'FAIL'; messageBox.classList.remove('hidden'); mainTitle.innerText = "DEFENSE FAILED!"; subText.innerText = "RESTARTING STAGE..."; subText.style.color = '#f50'; SoundManager.stopBGM(); setTimeout(() => { resetStage(); }, 2000); }
-function handlePlayerCrash() { gameState = 'CRASHED'; crashTimer = 0; isDragging = false; document.body.style.cursor = 'default'; spawnExplosion(player.x, player.y - 20, 'critical', "SYSTEM FAILURE", 0, 1); }
+function triggerStageFail() { gameState = 'FAIL'; messageBox.classList.remove('hidden'); mainTitle.innerText = "DEFENSE FAILED!"; subText.innerText = "RESTARTING STAGE..."; subText.style.color = '#888888'; SoundManager.stopBGM(); setTimeout(() => { resetStage(); }, 2000); }
+function handlePlayerCrash() { gameState = 'CRASHED'; crashTimer = 0; isDragging = false; document.body.style.cursor = 'default'; spawnExplosion(player.x, player.y - 20, 'critical', "SHIP IS DESTROYED", 0, 1); }
 function gameOver() { document.body.style.cursor = 'default'; fetchGlobalScores(); if(checkIsHighScore(score)) { gameState = 'INPUT'; messageBox.classList.add('hidden'); highscoreInput.classList.remove('hidden'); initialsField.value = ""; initialsField.focus(); } else { showLeaderboard(); } }
 function showLeaderboard() { gameState = 'LEADERBOARD'; messageBox.classList.add('hidden'); highscoreInput.classList.add('hidden'); }
 
@@ -686,7 +716,7 @@ function fireBullet() {
             vy: -200 - Math.random() * 300, 
             life: 0.7, 
             size: Math.random() * 3 + 2,
-            color: Math.random() > 0.3 ? '#ffaa00' : '#ffffff' 
+            color: Math.random() > 0.3 ? '#cccccc' : '#ffffff' 
         });
     }
 	
@@ -712,19 +742,19 @@ function spawnExplosion(x, y, tier, textValue, damageVal, multiplier) {
     SoundManager.playBassExplosion(chain); 
     
     let finalText = textValue;
-    if (textValue !== "SYSTEM FAILURE" && tier === 'critical' && multiplier > 1) { finalText = "Critical"; }
-    let textColor = (textValue === "SYSTEM FAILURE") ? '#0ff' : ((tier === 'critical') ? '#ff0000' : '#ffffff');
+    if (textValue !== "SHIP IS DESTROYED" && tier === 'critical' && multiplier > 1) { finalText = "Critical"; }
+    let textColor = (textValue === "SHIP IS DESTROYED") ? '#666666' : ((tier === 'critical') ? '#ffffff' : '#ffffff');
     particles.push({ type: 'text', x, y, text: finalText, life: 1.0, vy: -150, isCritical: (tier === 'critical'), color: textColor });
     let count, speed, colors, shockSize;
-    if (textValue === "SYSTEM FAILURE") { count=50; speed=800; colors=['#00ffff', '#ffffff', '#0088ff']; shockSize=500; } 
-    else if(tier==='small') { count=8; speed=300; colors=['#ffff00']; } 
-    else if(tier==='medium') { count=20; speed=500; colors=['#ff8800','#ff0000']; shockSize=100; } 
-    else { count=40; speed=800; colors=['#ff0000','#ffffff']; shockSize=300; } 
+    if (textValue === "SHIP IS DESTROYED") { count=50; speed=800; colors=['#ffffff', '#888888', '#444444']; shockSize=500; } 
+    else if(tier==='small') { count=8; speed=300; colors=['#cccccc']; } 
+    else if(tier==='medium') { count=20; speed=500; colors=['#ffffff','#666666']; shockSize=100; } 
+    else { count=40; speed=800; colors=['#ffffff','#333333']; shockSize=300; } 
     for(let i=0; i<count; i++){
         const ang = Math.random()*Math.PI*2, s = Math.random()*speed;
         particles.push({ type:'spark', x, y, vx:Math.cos(ang)*s, vy:Math.sin(ang)*s, size:Math.random()*4+2, color:colors[i%colors.length], life:1.0, decay:1.5 });
     }
-    if(tier==='critical' || textValue === "SYSTEM FAILURE") { particles.push({ type:'shockwave', x, y, size:10, maxSize:shockSize, color:colors[0], life:1.0, decay:1.0, damage: damageVal, hitList: [], age: 0, multiplier: multiplier }); } 
+    if(tier==='critical' || textValue === "SHIP IS DESTROYED") { particles.push({ type:'shockwave', x, y, size:10, maxSize:shockSize, color:colors[0], life:1.0, decay:1.0, damage: damageVal, hitList: [], age: 0, multiplier: multiplier }); } 
     else if (tier==='medium') { particles.push({ type:'shockwave_visual', x, y, size:10, maxSize:shockSize, color:colors[0], life:1.0, decay:2.0 }); }
 }
 
@@ -755,7 +785,7 @@ function update(dt) {
                                     vy: (Math.random() - 0.5) * 400,
                                     life: 1.0,
                                     size: Math.random() * 4 + 2,
-                                    color: Math.random() > 0.5 ? '#ffff00' : '#ffffff' 
+                                    color: Math.random() > 0.5 ? '#bbbbbb' : '#ffffff' 
                                 });
                             }
                             // 2. 화면에서 깔끔하게 삭제 (파사삭!)
@@ -822,7 +852,7 @@ function update(dt) {
 						hp: 1, // 보급선의 체력 (원하는 대로 조절하게)
 						maxHp: 1, 
 						speed: currentEnemySpeed * 0.8, // 일반 적보다 살짝 느리게
-						color: '#ff0', // 황금색 테두리!
+						color: '#888888', // 황금색 테두리!
 						isBoss: false,
 						dropItem: data.val // ★ 핵심: 죽을 때 떨어뜨릴 아이템 이름을 뱃속에 기억시킴 ★
 					});
@@ -853,7 +883,7 @@ function update(dt) {
 					hp: data.hp, 
 					maxHp: data.hp, 
 					speed: currentEnemySpeed, 
-					color: data.isBoss ? '#f00' : '#fff', 
+					color: data.isBoss ? '#444444' : '#ffffff', 
 					isBoss: data.isBoss,
 					isCriticalOnly: data.isCriticalOnly || false 
 				});
@@ -1162,16 +1192,16 @@ function draw() {
 	}	
 	
     if (gameState === 'LEADERBOARD' || gameState === 'UPLOADING') {
-        ctx.save(); ctx.fillStyle = '#0f0'; ctx.font = 'bold 40px "Neo Dunggeunmo"'; ctx.textAlign = 'center';
-        ctx.fillText("GLOBAL RANKING", GAME_WIDTH/2, 100); ctx.fillStyle = '#fff'; ctx.font = '24px "Neo Dunggeunmo"';
+        ctx.save(); ctx.fillStyle = '#ffffff'; ctx.font = 'bold 40px "Neo Dunggeunmo"'; ctx.textAlign = 'center';
+        ctx.fillText("GLOBAL RANKING", GAME_WIDTH/2, 100); ctx.fillStyle = '#bbbbbb'; ctx.font = '24px "Neo Dunggeunmo"';
         ctx.fillText(`YOUR SCORE: ${score}`, GAME_WIDTH/2, 150);
-        if (gameState === 'UPLOADING') { ctx.fillStyle = '#ff0'; ctx.font = '30px "Neo Dunggeunmo"'; ctx.fillText("UPLOADING TO SERVER...", GAME_WIDTH/2, GAME_HEIGHT/2); } 
-        else if (isFetching) { ctx.fillStyle = '#ff0'; ctx.font = '30px "Neo Dunggeunmo"'; ctx.fillText("FETCHING DATA...", GAME_WIDTH/2, GAME_HEIGHT/2); } 
+        if (gameState === 'UPLOADING') { ctx.fillStyle = '#cccccc'; ctx.font = '30px "Neo Dunggeunmo"'; ctx.fillText("UPLOADING TO SERVER...", GAME_WIDTH/2, GAME_HEIGHT/2); } 
+        else if (isFetching) { ctx.fillStyle = '#cccccc'; ctx.font = '30px "Neo Dunggeunmo"'; ctx.fillText("FETCHING DATA...", GAME_WIDTH/2, GAME_HEIGHT/2); } 
         else {
             ctx.textAlign = 'left'; let startY = 220;
 			
 			globalScores.forEach((row, i) => {
-            ctx.fillStyle = (i === 0) ? '#ff0' : (i === 1) ? '#ccc' : (i === 2) ? '#cd7f32' : '#fff';
+            ctx.fillStyle = (i === 0) ? '#ffffff' : (i === 1) ? '#cccccc' : (i === 2) ? '#999999' : '#666666';
             ctx.textAlign = 'left';
             
             // 1. 등수 출력
@@ -1211,7 +1241,7 @@ function draw() {
             ctx.fillText(row.score, 520, 180 + i * 28);
         });
 			
-            if (Math.floor(Date.now() / 500) % 2 === 0) { ctx.fillStyle = '#f00'; ctx.textAlign = 'center'; ctx.fillText("[ CLICK TO RESTART ]", GAME_WIDTH/2, GAME_HEIGHT - 50); }
+            if (Math.floor(Date.now() / 500) % 2 === 0) { ctx.fillStyle = '#888888'; ctx.textAlign = 'center'; ctx.fillText("[ CLICK TO RESTART ]", GAME_WIDTH/2, GAME_HEIGHT - 50); }
         }
 		
         ctx.restore(); return;
@@ -1219,31 +1249,21 @@ function draw() {
     if (gameState === 'PLAY' || gameState === 'TRANSITION' || gameState === 'FAIL' || gameState === 'INPUT' || gameState === 'CRASHED') {
         ctx.save(); if (gameState === 'INPUT' || gameState === 'CRASHED') ctx.globalAlpha = (gameState === 'CRASHED' ? 1.0 : 0.3);
         ctx.fillStyle = '#fff'; ctx.font = 'bold 24px "Neo Dunggeunmo"'; ctx.textAlign = 'left'; ctx.fillText(`LV: ${currentLevel}`, 20, 30);
-        ctx.textAlign = 'center'; ctx.fillText(`SCORE: ${score}`, GAME_WIDTH / 2, 30); ctx.textAlign = 'right'; ctx.fillStyle = '#f00';
+        ctx.textAlign = 'center'; ctx.fillText(`SCORE: ${score}`, GAME_WIDTH / 2, 30); ctx.textAlign = 'right'; ctx.fillStyle = '#cccccc';
         let hearts = "♥".repeat(Math.max(0, lives)); ctx.fillText(`LIVES: ${hearts}`, GAME_WIDTH - 20, 30);
 		
 		let timerY = 60; // 30픽셀 아래(60)부터 타이머를 출력하네.
         for (let key in activeItems) {
 			if (activeItems[key] > 0) {
 				// 1. 아이템 종류에 따라 색상과 라벨을 결정하네
-				let color = '#fff';
+				let color = '#dddddd';
 				let label = '';
 
-				if (key === 'easyBusy') {
-					color = '#ff66cc'; // 핑크
-					label = 'EASY-BUSY';
-				} else if (key === 'heavyRotation') {
-					color = '#00ffff'; // 하늘색
-					label = 'HEAVY-ROTATION';
-				} else if (key === 'timeStop') {
-					color = '#ffff00'; // 타임스톱 전용 골드!
-					label = 'RED-LIGHT SPECIAL';
-				} else if (key === 'penetration') {
-					color = '#f33';
-					label = 'PENETRATION';
-				}
+				if (key === 'easyBusy') { label = 'EASY-BUSY'; }
+				else if (key === 'heavyRotation') { label = 'HEAVY-ROTATION'; } 
+				else if (key === 'timeStop') { label = 'RED-LIGHT SPECIAL';	}
+				else if (key === 'penetration') { label = 'PENETRATION'; }
 
-				// 2. 결정된 설정으로 텍스트를 그리네
 				ctx.fillStyle = color;
 				ctx.font = 'bold 18px "Neo Dunggeunmo"';
 				ctx.textAlign = 'right';
@@ -1264,34 +1284,27 @@ function draw() {
             ctx.textBaseline = 'middle';
 
             if (it.type === 'num') {
-                // 숫자 아이템 (일반은 노란색, 파편은 주황색)
-                ctx.fillStyle = (it.isDebris ? '#ffa500' : '#ff0');
+                ctx.fillStyle = (it.isDebris ? '#888888' : '#ffffff');
                 ctx.font = (it.isDebris ? 'bold 20px' : 'bold 24px') + ' "Neo Dunggeunmo"';
                 ctx.fillText(it.val, 0, 0);
 
             } else if (it.type === 'sym') {
-                // 부호 아이템 (초록색)
-                ctx.fillStyle = '#0f0';
+                // 부호 아이템 (백은색)
+                ctx.fillStyle = '#eeeeee';
                 ctx.font = '40px "Neo Dunggeunmo"';
                 ctx.fillText(it.val, 0, 0);
 
             } else if (it.type === 'special') {
-                // [NEW] 특수 아이템 (사각형 그레이박싱)
-                let color = '#fff';
-                if (it.val === 'HEAVY_ROTATION') color = '#ff0'; // 노랑
-                else if (it.val === 'EASY_BUSY') color = '#f0f';     // 핑크
-                else if (it.val === 'TIME_STOP') color = '#0cf';     // 하늘
-                else if (it.val === 'PENETRATION') color = '#f33';   // 빨강
-
-                // 네온 효과 발동!
-                ctx.shadowColor = color;
+                let color = '#999999';
+                
+				ctx.shadowColor = '#ffffff';
                 ctx.shadowBlur = 15;
                 ctx.fillStyle = color;
                 ctx.fillRect(-15, -15, 30, 30); // 30x30 사이즈 박스
 
                 // 박스 위에 첫 글자 표시 (구분용)
                 ctx.shadowBlur = 0;
-                ctx.fillStyle = '#000';
+                ctx.fillStyle = '#000000';
                 ctx.font = 'bold 16px Arial';
                 ctx.fillText(it.val[0], 0, 0);
             }
@@ -1346,7 +1359,8 @@ function draw() {
         });
 				
 		if (gameState !== 'CRASHED' && gameState !== 'FAIL' && gameState !== 'GAMEOVER') {
-			if (player.expr !== "") { ctx.save(); ctx.font = 'bold 40px "Neo Dunggeunmo"'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; ctx.shadowColor = '#0f0'; ctx.shadowBlur = 10; ctx.fillStyle = '#fff'; ctx.fillText(player.expr, GAME_WIDTH / 2, GAME_HEIGHT - 20); ctx.restore(); }
+			if (player.expr !== "") { ctx.save(); ctx.font = 'bold 40px "Neo Dunggeunmo"'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; 
+			ctx.shadowColor = '#ffffff'; ctx.shadowBlur = 10; ctx.fillStyle = '#ffffff'; ctx.fillText(player.expr, GAME_WIDTH / 2, GAME_HEIGHT - 20); ctx.restore(); }
 
 			ctx.save(); 
 			if (!isDragging && gameState === 'PLAY') ctx.globalAlpha = 0.7;
