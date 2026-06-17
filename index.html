@@ -157,65 +157,72 @@ const SoundManager = {
     masterGain: null, 
     isMuted: false,
     tracks: ['test_bgm_01.mp3', 'test_bgm_02.mp3', 'test_bgm_03.mp3', 'test_bgm_04.mp3'],
-    bassBuffer1: null,
-	
-	init: function() {
+    
+    // 🎯 [로건의 수술 1]: 에이스 샘플 bass2(메가), bass3(일반/체인) 서랍장 장착
+    bassBuffer2: null, 
+    bassBuffer3: null, 
+
+    init: function() {
         if (this.ctx) return;
         window.AudioContext = window.AudioContext || window.webkitAudioContext;
         this.ctx = new AudioContext();
         this.masterGain = this.ctx.createGain();
         this.masterGain.connect(this.ctx.destination);
         
-        // 🔥 [로건의 사파리 Web Audio API 강제 언록 픽스]
-        // 오디오 엔진을 만들자마자 즉시 깨우고, 사파리가 딴소리 못 하게 무음 주파수를 한번 튕겨주네!
         if (this.ctx.state === 'suspended') {
             this.ctx.resume();
         }
         try {
             const dummyOsc = this.ctx.createOscillator();
             const dummyGain = this.ctx.createGain();
-            dummyGain.gain.setValueAtTime(0, this.ctx.currentTime); // 완전 무음 처리
+            dummyGain.gain.setValueAtTime(0, this.ctx.currentTime); 
             dummyOsc.connect(dummyGain);
             dummyGain.connect(this.ctx.destination);
             dummyOsc.start(0);
-            dummyOsc.stop(0.01); // 0.01초간 가짜 신호를 흘려 클럭을 동기화하네.
+            dummyOsc.stop(0.01); 
         } catch(e) {
             console.log("AudioContext Safari warm-up bypass", e);
         }
 
         this.createRadioStatic();
         
-        // [iOS 사파리 락 해제 핵심] 싱글톤 오디오 객체를 첫 터치 순간에 미리 단 하나만 생성해둔다네.
         if (!this.currentBgm) {
             this.currentBgm = new Audio();
-            // 빈 소리로 미끼를 던져 사파리 브라우저의 오디오 재생 승인을 미리 획득하네!
             this.currentBgm.play().catch(() => {});
         }
-		
-		this.loadBassSample();
-		
+
+        // 🎯 [로건의 수술 2]: 게임 기동 즉시 두 샘플을 비동기로 동시 적재하네!
+        this.loadBassSamples();
     },
-	
-    // 🎯 [로건의 신설 함수]: wav 파일을 이진 데이터로 긁어와 브라우저가 읽을 수 있게 디코딩
-	loadBassSample: function() {
+    
+    // 🎯 두 개의 에이스 샘플을 병렬로 긁어오는 프로토콜
+    loadBassSamples: function() {
         const self = this;
-        fetch('assets/bass1.wav')
+        
+        // bass2.wav (메가/치트 폭탄용 웅장한 아날로그 둥~)
+        fetch('assets/bass2.wav')
             .then(response => response.arrayBuffer())
             .then(arrayBuffer => self.ctx.decodeAudioData(arrayBuffer))
             .then(audioBuffer => {
-                self.bassBuffer1 = audioBuffer;
-                console.log("🛠️ [관제탑] bass1.wav 메모리 버퍼 적재 완료!");
+                self.bassBuffer2 = audioBuffer;
+                console.log("🛠️ [관제탑] 메가 베이스(bass2.wav) 버퍼 적재 완료!");
             })
-            .catch(e => console.error("오디오 샘플 로드 실패:", e));
+            .catch(e => console.error("bass2 로드 실패:", e));
+
+        // bass3.wav (일반/연쇄용 선명한 모범생 둥~)
+        fetch('assets/bass3.wav')
+            .then(response => response.arrayBuffer())
+            .then(arrayBuffer => self.ctx.decodeAudioData(arrayBuffer))
+            .then(audioBuffer => {
+                self.bassBuffer3 = audioBuffer;
+                console.log("🛠️ [관제탑] 일반 베이스(bass3.wav) 버퍼 적재 완료!");
+            })
+            .catch(e => console.error("bass3 로드 실패:", e));
     },
-	
-    // [iOS 전용 안전장치] 잠든 오디오 엔진을 유저가 화면을 만질 때마다 강제로 깨우는 함수일세.
+
     resume: function() {
         if (this.ctx && this.ctx.state === 'suspended') {
             this.ctx.resume();
-            
-            // 🔥 [로건의 사파리 2중 방벽] 
-            // 플레이 도중 혹시라도 사파리가 다시 오디오를 재울 것을 대비해, 깨울 때도 무음 파형을 쏴주네.
             try {
                 const osc = this.ctx.createOscillator();
                 const g = this.ctx.createGain();
@@ -246,7 +253,7 @@ const SoundManager = {
         if (!this.currentBgm) this.currentBgm = new Audio();
         this.currentBgm.pause();
         const idx = Math.floor(Math.random() * this.tracks.length);
-        this.currentBgm.src = this.tracks[idx]; // 객체를 새로 안 만들고 주소만 교체!
+        this.currentBgm.src = this.tracks[idx]; 
         this.currentBgm.loop = true;
         this.currentBgm.volume = 0.5; 
         this.currentBgm.play().catch(e => console.log("BGM wait", e));
@@ -259,48 +266,70 @@ const SoundManager = {
     playSpecificBGM: function(filename) {
         if (!this.currentBgm) this.currentBgm = new Audio();
         this.currentBgm.pause();
-        this.currentBgm.src = filename; // 객체를 새로 안 만들고 주소만 교체!
+        this.currentBgm.src = filename; 
         this.currentBgm.loop = true;
         this.currentBgm.volume = 0.5; 
         this.currentBgm.play().catch(e => console.log("BGM wait", e));
     },
 	
-	// 🎯 [로건의 핀포인트 3]: 파일 소스를 받아 연쇄 법칙에 맞춰 속도를 조절하는 playBassExplosion 전면 개편!
-    playBassExplosion: function(chainCount = 0) {
-        if (!this.ctx || this.isMuted || !this.bassBuffer1) return; // 버퍼가 아직 로드 안 됐으면 침묵 가드
+	// 🎯 [버그 수정]: 첫 타격에서 고정된 무기와 피치 톤을 연쇄 끝까지 완벽하게 유지하는 코드
+    playBassExplosion: function(chainCount = 0, forcedType = null, forcedBase = null) {
+        if (!this.ctx || this.isMuted) return;
         try {
             const now = this.ctx.currentTime;
-            
-            // 신디사이저(Oscillator) 대신 가상 발사대(BufferSource)를 매번 새로 만드네.
             const source = this.ctx.createBufferSource();
-            source.buffer = this.bassBuffer1; // 서랍에 쟁여둔 순정 bass1 오디오 데이터 주입
-            
             const gain = this.ctx.createGain();
 
-            // 12음계 연쇄 피치 계산 공식을 그대로 대입하여 '재생 속도'를 동적으로 제어하네!
-            // 기본 속도(1.0)를 기준으로 체인 카운트가 올라갈수록 소리가 자연스럽고 선명하게 빨라지지.
-            const rateMultiplier = Math.pow(1.05946, chainCount % 12);
+            let targetBuffer = null;
+            let rateMultiplier = 1.0;
+
+            if (chainCount === -1) { 
+                if (!this.bassBuffer2) return;
+                targetBuffer = this.bassBuffer2;
+                rateMultiplier = 1.0; 
+            } else {
+                // 🎯 [유전자 판별]: 외부에서 "이 무기로 고정해!"라고 넘겨주면(연쇄 중일 때) 주사위를 굴리지 않고 그대로 복종하네!
+                let finalType = forcedType;
+                let finalBase = forcedBase;
+
+                // 만약 단발성이라 지정된 게 없다면 여기서 새로 주사위를 굴리네.
+                if (!finalType) {
+                    finalType = Math.random() < 0.5 ? 'bass2' : 'bass3';
+                    finalBase = 0.90 + (Math.random() * 0.20);
+                }
+
+                targetBuffer = (finalType === 'bass2') ? this.bassBuffer2 : this.bassBuffer3;
+                if (!targetBuffer) return;
+
+                if (chainCount > 1) {
+                    // 🔥 [연쇄 폭발]: 첫 발 쏠 때 고정된 시작음(finalBase)을 그대로 기둥으로 삼고, 
+                    // 그 위로 자네의 12음계 수식 계단만 깔끔하고 선명하게 쌓아 올리네! (들쑥날쑥 현상 완벽 소멸)
+                    rateMultiplier = finalBase * Math.pow(1.05946, (chainCount - 1) % 12);
+                } else {
+                    // 일반 단발성 폭발은 고정된 변주 피치 그대로 발사!
+                    rateMultiplier = finalBase;
+                }
+            }
+
+            source.buffer = targetBuffer;
             source.playbackRate.setValueAtTime(rateMultiplier, now);
 
-            // 볼륨 엔벨로프 세팅 (순정 오디오 소스 본연의 질감을 살리기 위해 볼륨만 제어)
+            const sampleDuration = targetBuffer.duration / rateMultiplier;
             gain.gain.setValueAtTime(0, now);
-            gain.gain.linearRampToValueAtTime(0.9, now + 0.01); // 클릭 노이즈 방지용 초고속 attack
-            gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5); // 0.5초 동안 부드러운 여운
+            gain.gain.linearRampToValueAtTime(0.95, now + 0.01); 
+            gain.gain.exponentialRampToValueAtTime(0.001, now + sampleDuration);
 
-            // 회선 연결: 발사대 -> 볼륨 -> 마스터 믹서
             source.connect(gain);
             gain.connect(this.masterGain);
 
             source.start(now);
-            // 오디오 샘플 자체의 길이(duration)를 속도로 나눈 만큼 안전하게 정지 타이밍 계산
-            source.stop(now + (this.bassBuffer1.duration / rateMultiplier) + 0.1); 
+            source.stop(now + sampleDuration + 0.05); 
             
-            console.log("하이브리드 샘플 폭발음 재생 완료 (체인 배율):", rateMultiplier);
+            console.log(`[연쇄 동기화 폭발] 샘플: ${targetBuffer === this.bassBuffer2 ? 'bass2' : 'bass3'}, 체인: ${chainCount}, 최종배율: ${rateMultiplier.toFixed(3)}`);
         } catch(e) {
             console.error("오디오 출력 오류:", e);
         }
     },
-	
 	
     playBlockSound: function() {
         if (!this.ctx || this.isMuted) return;
@@ -781,10 +810,20 @@ function spawnDebris(x, y, hp) {
 }
 
 function spawnExplosion(x, y, tier, textValue, damageVal, multiplier) {
-    // 🛠️ [로건의 사운드 픽스]: 파티클 생성 전에 오디오 엔진을 먼저 깨워 반응 속도를 0으로 만든다!
-    // 연쇄 폭발(Chain) 배율이 1보다 크면(즉, 2 이상이면) 체인 카운트를 사운드 엔진에 전달하네.
+    // 🎲 [로건의 유전자 동기화]: 외부에서 강제로 주입된 사운드 유전자가 있는지 검사하네!
+    // 최초 직격탄일 때는 window.nextSoundType이 없을 테니, 여기서 50% 주사위를 딱 한 번만 굴려 픽스하지.
+    let soundType = window.nextSoundType || (Math.random() < 0.5 ? 'bass2' : 'bass3');
+    let soundBase = window.nextSoundBase || (0.90 + (Math.random() * 0.20));
+    
+    // 계산된 체인 카운트
     let chain = multiplier > 1 ? (multiplier - 1) : 0; 
-    SoundManager.playBassExplosion(chain); 
+    
+    // 🎯 확정된 사운드 무기와 고정된 시작 피치를 매니저에게 토스!
+    SoundManager.playBassExplosion(chain, soundType, soundBase); 
+    
+    // 사용한 글로벌 일회성 미끼는 다음 폭발을 위해 즉시 청소하네.
+    window.nextSoundType = null;
+    window.nextSoundBase = null;
     
     let finalText = textValue;
     if (textValue !== "SHIP IS DESTROYED" && tier === 'critical' && multiplier > 1) { finalText = "Critical"; }
@@ -793,17 +832,27 @@ function spawnExplosion(x, y, tier, textValue, damageVal, multiplier) {
     // 이펙트 텍스트 생성
     particles.push({ type: 'text', x, y, text: finalText, life: 1.0, vy: -150, isCritical: (tier === 'critical'), color: textColor });
     
-    // (이하 폭발 파티클 로직은 그대로 유지...)
+    // 파티클 기본 물리량 결정
     let count, speed, colors, shockSize;
     if (textValue === "SHIP IS DESTROYED") { count=50; speed=800; colors=['#ffffff', '#888888', '#444444']; shockSize=500; } 
     else if(tier==='small') { count=8; speed=300; colors=['#cccccc']; } 
     else if(tier==='medium') { count=20; speed=500; colors=['#ffffff','#666666']; shockSize=100; } 
     else { count=40; speed=800; colors=['#ffffff','#333333']; shockSize=300; } 
+    
     for(let i=0; i<count; i++){
         const ang = Math.random()*Math.PI*2, s = Math.random()*speed;
         particles.push({ type:'spark', x, y, vx:Math.cos(ang)*s, vy:Math.sin(ang)*s, size:Math.random()*4+2, color:colors[i%colors.length], life:1.0, decay:1.5 });
     }
-    if(tier==='critical' || textValue === "SHIP IS DESTROYED") { particles.push({ type:'shockwave', x, y, size:10, maxSize:shockSize, color:colors[0], life:1.0, decay:1.0, damage: damageVal, hitList: [], age: 0, multiplier: multiplier }); } 
+    
+    // 🎯 [핵심 패치]: 충격파가 생성될 때 현재 결정된 사운드와 피치 유전자를 뱃속에 문신처럼 새겨놓네!
+    if(tier==='critical' || textValue === "SHIP IS DESTROYED") { 
+        particles.push({ 
+            type: 'shockwave', x, y, size: 10, maxSize: shockSize, color: colors[0], life: 1.0, decay: 1.0, 
+            damage: damageVal, hitList: [], age: 0, multiplier: multiplier,
+            inheritedSoundType: soundType, // 🔥 무기 유전자 장착!
+            inheritedSoundBase: soundBase   // 🔥 피치 유전자 장착!
+        }); 
+    } 
     else if (tier==='medium') { particles.push({ type:'shockwave_visual', x, y, size:10, maxSize:shockSize, color:colors[0], life:1.0, decay:2.0 }); }
 }
 
@@ -1191,6 +1240,8 @@ function update(dt) {
                             score += actualDmg * p.multiplier; en.hp -= p.damage; p.hitList.push(en);
                             if (en.hp <= 0) {
                                 if (isStrictCrit && en.isBoss) spawnDebris(en.x + en.width/2, en.y + en.height/2, p.damage);
+								window.nextSoundType = p.inheritedSoundType;
+								window.nextSoundBase = p.inheritedSoundBase;
                                 spawnExplosion(en.x + en.width/2, en.y + en.height/2, isStrictCrit ? 'critical' : 'medium', isStrictCrit ? "CHAIN!" : p.damage, p.damage, p.multiplier + 1);
 								if (en.dropItem) { items.push({ type: 'special', val: en.dropItem, x: en.x + en.width/2, y: en.y + en.height/2, speed: 150 }); }
                                 enemies.splice(j, 1);
