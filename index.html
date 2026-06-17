@@ -148,6 +148,55 @@ let activeItems = {
     heavyRotation: 0
 };
 
+// 💾 [로건의 암호화 세이브 시스템]: 유저 조작을 원천 차단하는 이중 방벽 금고일세.
+const SaveSystem = {
+    SECRET_KEY: 119, // 수식 치트를 방어하기 위한 비밀 XOR 오차 키라네.
+    
+    // 데이터를 안전하게 꾸워내어 로컬 스토리지에 박는 함수
+    save: function(level, score, lives) {
+        try {
+            const dataObj = { lvl: level, scr: score, lvs: lives };
+            const jsonStr = JSON.stringify(dataObj);
+            
+            // 1차 암호화: 글자 주파수를 비밀 키로 비틀어버리네.
+            let xorStr = "";
+            for (let i = 0; i < jsonStr.length; i++) {
+                xorStr += String.fromCharCode(jsonStr.charCodeAt(i) ^ this.SECRET_KEY);
+            }
+            // 2차 암호화: 브라우저가 직접 읽지 못하게 Base64 문자로 인코딩 가동!
+            const encData = btoa(encodeURIComponent(xorStr));
+            localStorage.setItem('mste_sys_save', encData);
+            console.log("🛠️ [관제탑] 전장 상태 암호화 세이브 완료.");
+        } catch(e) { console.error("세이브 오류:", e); }
+    },
+
+    // 외계어로 짜인 금고를 다시 해독하는 함수
+    load: function() {
+        try {
+            const encData = localStorage.getItem('mste_sys_save');
+            if (!encData) return null;
+            
+            // 역순으로 복호화 알고리즘 가동
+            const xorStr = decodeURIComponent(atob(encData));
+            let jsonStr = "";
+            for (let i = 0; i < xorStr.length; i++) {
+                jsonStr += String.fromCharCode(xorStr.charCodeAt(i) ^ this.SECRET_KEY);
+            }
+            return JSON.parse(jsonStr);
+        } catch(e) {
+            console.error("복호화 에러 (조작 흔적 감지):", e);
+            this.clear(); // 강제 변조 흔적이 있다면 금고를 파쇄해 버리네!
+            return null;
+        }
+    },
+
+    // 금고 영구 파쇄 함수 (게임오버 시 사용)
+    clear: function() {
+        localStorage.removeItem('mste_sys_save');
+        console.log("🛠️ [관제탑] 세이브 데이터 완전 초기화 완료.");
+    }
+};
+
 // --- AUDIO SYSTEM ---
 const SoundManager = {
     ctx: null, 
@@ -196,9 +245,20 @@ const SoundManager = {
     },
     
     // 🎯 두 개의 에이스 샘플을 병렬로 긁어오는 프로토콜
-    loadBassSamples: function() {
+	loadBassSamples: function() {
         const self = this;
         
+        // bass1.wav (단정하고 깔끔한 맛)
+        fetch('assets/bass1.wav')
+            .then(response => response.arrayBuffer())
+            .then(arrayBuffer => self.ctx.decodeAudioData(arrayBuffer))
+            .then(audioBuffer => {
+                // 기존에 선언되어 있던 this.bassBuffer1 서랍을 그대로 활용하네.
+                self.bassBuffer1 = audioBuffer;
+                console.log("🛠️ [관제탑] 베이스 1호(bass1.wav) 버퍼 적재 완료!");
+            })
+            .catch(e => console.error("bass1 로드 실패:", e));
+
         // bass2.wav (메가/치트 폭탄용 웅장한 아날로그 둥~)
         fetch('assets/bass2.wav')
             .then(response => response.arrayBuffer())
@@ -293,12 +353,28 @@ const SoundManager = {
                 let finalBase = forcedBase;
 
                 // 만약 단발성이라 지정된 게 없다면 여기서 새로 주사위를 굴리네.
-                if (!finalType) {
-                    finalType = Math.random() < 0.5 ? 'bass2' : 'bass3';
+				if (!finalType) {
+                    // 🎲 [자네의 기획]: 33.3% 확률로 3가지 샘플 중 하나를 완전히 무작위 셔플링!
+                    const dice = Math.random();
+                    if (dice < 0.33) {
+                        finalType = 'bass1';
+                    } else if (dice < 0.66) {
+                        finalType = 'bass2';
+                    } else {
+                        finalType = 'bass3';
+                    }
+                    
                     finalBase = 0.90 + (Math.random() * 0.20);
                 }
 
-                targetBuffer = (finalType === 'bass2') ? this.bassBuffer2 : this.bassBuffer3;
+                if (finalType === 'bass1') {
+                    targetBuffer = this.bassBuffer1;
+                } else if (finalType === 'bass2') {
+                    targetBuffer = this.bassBuffer2;
+                } else {
+                    targetBuffer = this.bassBuffer3;
+                }
+				
                 if (!targetBuffer) return;
 
                 if (chainCount > 1) {
@@ -610,7 +686,28 @@ function spawnForceNumbers(targetNumbers) {
     });
 }
 
-function startGame() { SoundManager.init(); score = 0; currentLevel = 1; lives = 3; resetStage(); }
+// function startGame() { SoundManager.init(); score = 0; currentLevel = 1; lives = 3; resetStage(); }
+function startGame() { 
+    SoundManager.init(); 
+
+    // 🎯 [자네의 기획 2]: 브라우저 비밀 주머니를 열어 해독 가능한 이전 세이브 기록이 있는지 확인하네.
+    const savedRecord = SaveSystem.load();
+    
+    if (savedRecord) {
+        // 저장된 기록이 있다면, 마지막으로 '클리어한 스테이지의 다음 스테이지'부터 점수와 목숨을 복구하네!
+        currentLevel = savedRecord.lvl + 1; 
+        score = savedRecord.scr;
+        lives = savedRecord.lvs;
+        console.log(`🛠️ [관제탑] 복호화 성공. 이전 작전 반경을 이어받아 레벨 ${currentLevel}부터 이어서 기동하네!`);
+    } else {
+        // 기록이 아예 없거나 변조되어 파쇄되었다면, 순정 규격대로 1레벨 생짜 신입 출발!
+        score = 0; 
+        currentLevel = 1; 
+        lives = 3; 
+    }
+    
+    resetStage(); 
+}
 
 function resetStage() {
     gameState = 'PLAY'; messageBox.classList.add('hidden'); highscoreInput.classList.add('hidden'); document.body.style.cursor='none';
@@ -623,10 +720,38 @@ function resetStage() {
     enemySpawnData = generateLevel(currentLevel);
     lastTime = performance.now(); 
 }
-function showLevelClearScreen() { gameState = 'TRANSITION'; currentLevel++; messageBox.classList.remove('hidden'); mainTitle.innerText = "STAGE CLEAR!"; subText.innerText = `[ CLICK FOR LEVEL ${currentLevel} ]`; subText.style.color = '#fff'; }
+// function showLevelClearScreen() { gameState = 'TRANSITION'; currentLevel++; messageBox.classList.remove('hidden'); mainTitle.innerText = "STAGE CLEAR!"; subText.innerText = `[ CLICK FOR LEVEL ${currentLevel} ]`; subText.style.color = '#fff'; }
+function showLevelClearScreen() { 
+    // 🎯 [자네의 기획 1]: 스테이지를 깨는 그 즉시 현재 레벨, 스코어, 목숨 대수를 암호화 세이브하네!
+    SaveSystem.save(currentLevel, score, lives);
+
+    gameState = 'TRANSITION'; 
+    currentLevel++; 
+    messageBox.classList.remove('hidden'); 
+    mainTitle.innerText = "STAGE CLEAR!"; 
+    subText.innerText = `[ CLICK FOR LEVEL ${currentLevel} ]`; 
+    subText.style.color = '#fff'; 
+}
 function triggerStageFail() { gameState = 'FAIL'; messageBox.classList.remove('hidden'); mainTitle.innerText = "DEFENSE FAILED!"; subText.innerText = "RESTARTING STAGE..."; subText.style.color = '#888888'; SoundManager.stopBGM(); setTimeout(() => { resetStage(); }, 2000); }
 function handlePlayerCrash() { gameState = 'CRASHED'; crashTimer = 0; isDragging = false; document.body.style.cursor = 'default'; spawnExplosion(player.x, player.y - 20, 'critical', "SHIP IS DESTROYED", 0, 1); }
-function gameOver() { document.body.style.cursor = 'default'; fetchGlobalScores(); if(checkIsHighScore(score)) { gameState = 'INPUT'; messageBox.classList.add('hidden'); highscoreInput.classList.remove('hidden'); initialsField.value = ""; initialsField.focus(); } else { showLeaderboard(); } }
+// function gameOver() { document.body.style.cursor = 'default'; fetchGlobalScores(); if(checkIsHighScore(score)) { gameState = 'INPUT'; messageBox.classList.add('hidden'); highscoreInput.classList.remove('hidden'); initialsField.value = ""; initialsField.focus(); } else { showLeaderboard(); } }
+function gameOver() { 
+    document.body.style.cursor = 'default'; 
+    
+    // 🎯 [자네의 기획 3]: 완전히 패배하여 전멸했으니 로컬 세이브 데이터를 흔적도 없이 삭제하네!
+    SaveSystem.clear();
+
+    fetchGlobalScores(); 
+    if(checkIsHighScore(score)) { 
+        gameState = 'INPUT'; 
+        messageBox.classList.add('hidden'); 
+        highscoreInput.classList.remove('hidden'); 
+        initialsField.value = ""; 
+        initialsField.focus(); 
+    } else { 
+        showLeaderboard(); 
+    } 
+}
 function showLeaderboard() { gameState = 'LEADERBOARD'; messageBox.classList.add('hidden'); highscoreInput.classList.add('hidden'); }
 
 // --- INPUT & UPDATE ---
