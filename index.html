@@ -520,6 +520,7 @@ const playerImgFlame2 = new Image();  playerImgFlame2.src = 'assets/playership_f
 const player = { x: GAME_WIDTH / 2, y: GAME_HEIGHT - 150, width: 40, height: 40, expr: "" };
 let bullets = [], enemies = [], items = [], particles = [];
 let enemySpawnData = [];
+let tailPositions = [];
 let lastSpawnNum = 0, lastSpawnSym = 0, numCounter = 1; symIndex = 0;
 
 // --- INITIALIZATION ---
@@ -1309,7 +1310,7 @@ function update(dt) {
 					}
                 }
 
-                score += actualDmg;
+                score += dmg;
                 spawnExplosion(en.x + en.width/2, en.y + en.height/2, tier, isCrit ? "CRITICAL!" : dmg, dmg, 2);
                 en.hp -= dmg; 
                 if (en.hp <= 0) {
@@ -1378,7 +1379,43 @@ function update(dt) {
         }
         if (p.life <= 0) particles.splice(i, 1);
     }
+	
+	if (gameState === 'PLAY') {
+        // 현재 수식을 문자/기호 단위 토큰으로 정밀 분해하네. (예: "10+5" -> ["10", "+", "5"])
+        const tokens = player.expr.match(/\d+|[+\-×÷]/g) || [];
+        
+        // 글자가 늘어나거나 줄어들면 꼬리 좌표 가방 크기도 동기화하네.
+        if (tailPositions.length !== tokens.length) {
+            if (tailPositions.length < tokens.length) {
+                while (tailPositions.length < tokens.length) {
+                    tailPositions.push({ x: player.x, y: player.y + 50 });
+                }
+            } else {
+                tailPositions.splice(tokens.length);
+            }
+        }
+
+        // 각 마디가 앞 단계를 부드럽게 추적하는 lerp(보간) 공식 발동!
+        for (let i = 0; i < tokens.length; i++) {
+            let targetX, targetY;
+            
+            if (i === 0) {
+                // 첫 번째 마디는 비행기 바로 밑 45px 지점을 조준하네.
+                targetX = player.x;
+                targetY = player.y + 50;
+            } else {
+                // 두 번째 마디부터는 바로 앞 마디의 X좌표와, 앞 마디의 Y에서 30px 더 아래 지점을 조준하네!
+                targetX = tailPositions[i - 1].x;
+                targetY = tailPositions[i - 1].y + 20;
+            }
+
+            // 텔레포트하지 않고 dt 속도에 맞춰 스르륵 미끄러지듯 따라오게 만드는 전술 보간 공식
+            tailPositions[i].x += (targetX - tailPositions[i].x) * 15 * dt;
+            tailPositions[i].y += (targetY - tailPositions[i].y) * 15 * dt;
+        }
+    }
 }
+
 function draw() {
     ctx.fillStyle = '#000'; ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
     drawStars();
@@ -1584,9 +1621,31 @@ function draw() {
         });
 				
 		if (gameState !== 'CRASHED' && gameState !== 'FAIL' && gameState !== 'GAMEOVER') {
-			if (player.expr !== "") { ctx.save(); ctx.font = 'bold 40px "Neo Dunggeunmo"'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; 
-			ctx.shadowColor = '#ffffff'; ctx.shadowBlur = 10; ctx.fillStyle = '#ffffff'; ctx.fillText(player.expr, GAME_WIDTH / 2, GAME_HEIGHT - 20); ctx.restore(); }
+			if (player.expr !== "" && tailPositions.length > 0) {
+                const tokens = player.expr.match(/\d+|[+\-×÷]/g) || [];
+                
+                ctx.save();
+                // 난전 시 시야 방해를 막기 위해 꼬리 수식 전체에 부드러운 65% 반투명 보호막 적용!
+                ctx.globalAlpha = 0.65; 
+                ctx.font = 'bold 26px "Neo Dunggeunmo"';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
 
+                // 가방에 저장된 마디별 개별 좌표를 순회하며 한 글자씩 낭만적으로 뿌려주네.
+                for (let i = 0; i < tokens.length; i++) {
+                    if (!tailPositions[i]) continue;
+                    
+                    // 어떤 이펙트와 겹쳐도 수식이 묻히지 않도록 선명한 블랙 아웃라인 선장착!
+                    ctx.lineWidth = 5;
+                    ctx.strokeStyle = '#000000';
+                    ctx.strokeText(tokens[i], tailPositions[i].x, tailPositions[i].y);
+                    
+                    // 그 위에 순백의 레트로 폰트를 얹어 마무리하네.
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillText(tokens[i], tailPositions[i].x, tailPositions[i].y);
+                }
+				ctx.restore();
+			}
 			ctx.save(); 
 			if (!isDragging && gameState === 'PLAY') ctx.globalAlpha = 0.7;
 
