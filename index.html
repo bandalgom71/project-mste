@@ -119,7 +119,7 @@ let isDragging = false;
 let lastTime = 0, elapsedTime = 0;
 let stageClearTimer = 0;
 let crashTimer = 0; 
-
+let warpTimer = 0;
 let pickupTimer = 0; 
 const PICKUP_COOLDOWN = 0.2; 
 
@@ -457,7 +457,29 @@ function updateStars(dt) {
         if (s.y > GAME_HEIGHT) { s.y = 0; s.x = Math.random() * GAME_WIDTH; } 
     }); 
 }
-function drawStars() { ctx.save(); stars.forEach(s => { ctx.fillStyle = `rgba(255, 255, 255, ${s.alpha})`; ctx.beginPath(); ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2); ctx.fill(); }); ctx.restore(); }
+
+function drawStars() { 
+    ctx.save(); 
+    stars.forEach(s => { 
+        ctx.fillStyle = `rgba(255, 255, 255, ${s.alpha})`; 
+        ctx.strokeStyle = `rgba(255, 255, 255, ${s.alpha * 0.5})`;
+
+        ctx.beginPath();
+        if (gameState === 'WARP') {
+            // 🎯 [워프 스타라인]: '흑백 미학' 준수! 별의 현재 위치에서 위쪽으로 길게 뻗은 연회색 선을 그리네!
+            ctx.lineWidth = s.size * 1.5;
+            ctx.moveTo(s.x, s.y);
+            ctx.lineTo(s.x, s.y - (s.speed * 0.08)); // 속도에 비례해서 광선이 길어지네.
+            ctx.stroke();
+        } else {
+            // 순정 상태일 때는 원래대로 이쁜 원형 점으로 렌더링하네.
+            ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+            ctx.fill(); 
+        }
+    }); 
+    ctx.restore(); 
+}
+
 initStars();
 
 // --- SERVER LOGIC ---
@@ -537,7 +559,7 @@ function getGameCoordinates(clientX, clientY) { return { x: (clientX - canvasOff
 // UI Handlers
 messageBox.addEventListener('mousedown', handleUiClick);
 messageBox.addEventListener('touchstart', (e) => { e.preventDefault(); handleUiClick(); });
-function handleUiClick() { if (gameState === 'START' || gameState === 'LEADERBOARD') startGame(); else if (gameState === 'TRANSITION') resetStage(); }
+function handleUiClick() { if (gameState === 'START' || gameState === 'LEADERBOARD') startGame(); else if (gameState === 'TRANSITION') startWarpDrive(); }
 
 submitBtn.addEventListener('click', () => {
     const nameField = document.getElementById('initials');
@@ -711,7 +733,9 @@ function startGame() {
 }
 
 function resetStage() {
-    gameState = 'PLAY'; messageBox.classList.add('hidden'); highscoreInput.classList.add('hidden'); document.body.style.cursor='none';
+    gameState = 'PLAY'; messageBox.classList.add('hidden'); highscoreInput.classList.add('hidden');
+    document.body.style.cursor = 'none';
+	player.x = GAME_WIDTH / 2; player.y = GAME_HEIGHT - 150;
     elapsedTime = 0; stageClearTimer = 0; crashTimer = 0; pickupTimer = 0;
     player.expr = ""; bullets = []; enemies = []; items = []; particles = [];
 	currentEnemySpeed = ENEMY_BASE_SPEED;
@@ -721,11 +745,12 @@ function resetStage() {
     enemySpawnData = generateLevel(currentLevel);
     lastTime = performance.now(); 
 }
-// function showLevelClearScreen() { gameState = 'TRANSITION'; currentLevel++; messageBox.classList.remove('hidden'); mainTitle.innerText = "STAGE CLEAR!"; subText.innerText = `[ CLICK FOR LEVEL ${currentLevel} ]`; subText.style.color = '#fff'; }
 function showLevelClearScreen() { 
-    // 🎯 [자네의 기획 1]: 스테이지를 깨는 그 즉시 현재 레벨, 스코어, 목숨 대수를 암호화 세이브하네!
+    // 1. 암호화 세이브 기동
     SaveSystem.save(currentLevel, score, lives);
+    canvas.style.cursor = 'default';
 
+    // 2. 상태 전환 및 UI 갱신
     gameState = 'TRANSITION'; 
     currentLevel++; 
     messageBox.classList.remove('hidden'); 
@@ -733,6 +758,15 @@ function showLevelClearScreen() {
     subText.innerText = `[ CLICK FOR LEVEL ${currentLevel} ]`; 
     subText.style.color = '#fff'; 
 }
+
+function startWarpDrive() {
+    gameState = 'WARP';
+    warpTimer = 0;
+	bullets = [];
+    messageBox.classList.add('hidden'); // STAGE CLEAR 팝업창을 화면에서 즉시 숨기네!
+    document.body.style.cursor = 'none'; // 워프 연출 중에는 마우스 커서를 완전히 숨기네.
+}
+
 function triggerStageFail() { gameState = 'FAIL'; messageBox.classList.remove('hidden'); mainTitle.innerText = "DEFENSE FAILED!"; subText.innerText = "RESTARTING STAGE..."; subText.style.color = '#888888'; SoundManager.stopBGM(); setTimeout(() => { resetStage(); }, 2000); }
 function handlePlayerCrash() { gameState = 'CRASHED'; crashTimer = 0; isDragging = false; document.body.style.cursor = 'default'; spawnExplosion(player.x, player.y - 20, 'critical', "SHIP IS DESTROYED", 0, 1); }
 // function gameOver() { document.body.style.cursor = 'default'; fetchGlobalScores(); if(checkIsHighScore(score)) { gameState = 'INPUT'; messageBox.classList.add('hidden'); highscoreInput.classList.remove('hidden'); initialsField.value = ""; initialsField.focus(); } else { showLeaderboard(); } }
@@ -760,7 +794,13 @@ window.addEventListener('mousedown', () => {
     SoundManager.resume(); // 터치할 때마다 사운드 엔진 즉시 수면 깨우기!
     if (gameState === 'LEADERBOARD') startGame(); 
     else if (gameState === 'PLAY') isDragging = true; 
+    else if (gameState === 'TRANSITION') {
+        // 🎯 [클릭 먹통 격파]: 클리어 화면에서는 마우스 화살표가 선명하게 보일 뿐만 아니라,
+        // 화면 캔버스 어디든 툭 클릭만 하면 픽셀 헌팅 없이 즉시 하이퍼 스페이스 워프 연출로 진입하네!
+        handleUiClick(); 
+    }
 });
+
 window.addEventListener('touchstart', (e) => { 
     SoundManager.resume(); // 모바일 터치 스타트 순간에도 엔진 깨우기!
     if (gameState === 'LEADERBOARD') { e.preventDefault(); startGame(); } 
@@ -777,26 +817,22 @@ window.addEventListener('touchend', () => {
 
 window.addEventListener('keydown', function(e) {
     if (e.key === 'n' || e.key === 'N') {
-        if (gameState === 'PLAY') { // 플레이 중일 때만 작동
-            console.log("🛠️ [DEBUG] 관제탑 권한으로 다음 스테이지 강제 진입!");
+		if (gameState === 'PLAY') { // 플레이 중일 때만 작동
+            console.log("🛠️ [DEBUG] 관제탑 권한으로 스테이지 강제 클리어 프로토콜 발동!");
             
-            // 다음 스테이지 인덱스로 증가 (현재 레벨이 1부터 시작하므로 index.js 매칭)
-            currentLevel++; 
-            
-            // 만약 다음 스테이지 데이터가 있으면 전환, 없으면 엔딩 처리
-            if (typeof STAGE_DATA !== 'undefined' && currentLevel <= STAGE_DATA.length) {
-                resetStage(); // 자네가 만든 스테이지 리셋 및 로드 함수 호출!
-            } else {
-                console.log("🛠️ [DEBUG] 마지막 스테이지입니다. 게임 클리어 상태로 전환합니다.");
-                gameState = 'CLEAR'; 
-            }
+            // 🎯 [워프 테스트 밑작업]: 무작정 화면을 리셋하지 않고, 자네가 설계한 정식 클리어 스크린을 띄우네!
+            // 이 함수 안에서 자동으로 암호화 세이브도 발동하고 레벨 증가 회선도 태우기 때문에 안전하네.
+            showLevelClearScreen();
         }
     }
 	
-    if ((e.key === 'z' || e.key === 'Z') && gameState === 'PLAY') {
+	if ((e.key === 'z' || e.key === 'Z') && gameState === 'PLAY') {
         console.log("🛠️ [DEBUG] 관제탑 권한으로 즉시 하이스코어 검증 및 게임오버 진입!");
+        
+        // 🎯 [버그 해결]: 이제는 정확하게 SaveSystem의 clear 함수를 호출하여 `'mste_sys_save'`를 완벽하게 파쇄하네!
+        SaveSystem.clear();
+        
         document.body.style.cursor = 'default';
-        // 자네가 설계해 둔 게임오버 프로세스를 다이렉트로 가동하네!
         fetchGlobalScores(); 
         if (checkIsHighScore(score)) { 
             gameState = 'INPUT'; 
@@ -807,7 +843,7 @@ window.addEventListener('keydown', function(e) {
         } else { 
             showLeaderboard(); 
         }
-    } // ⬅️ [로건의 픽스] 기존에 있던 불필요한 '}' 1개를 제거하여 흐름을 이어가네!
+    }
 	
     if ((e.key === 'b' || e.key === 'B') && gameState === 'PLAY') {
         console.log("🛠️ [DEBUG] 폭탄 치트키 발동! 필드를 완전히 청소하네.");
@@ -1033,6 +1069,41 @@ function update(dt) {
         if (crashTimer > 1.5) { lives--; if (lives <= 0) gameOver(); else triggerStageFail(); }
         return; 
     }
+	
+	if (gameState === 'WARP') {
+		warpTimer += dt;
+
+		// 1. 별들의 속도를 매 프레임마다 미친 듯이 오버클럭하네! (초고속 스크롤 연출용)
+		stars.forEach(s => {
+			s.speed += 2000 * dt; 
+			s.y += s.speed * dt;
+			if (s.y > GAME_HEIGHT) { s.y = 0; s.x = Math.random() * GAME_WIDTH; }
+		});
+		
+		// 🎯 [아이템 잔상 격파]: 화면에 남아있던 숫자/기호들을 하단으로 폭풍 사출시켜 상대 속도감을 극대화하네!
+		items.forEach(it => {
+			it.y += 3000 * dt; // 초속 3000픽셀의 압도적인 속도로 하강!
+		});
+		// 화면 밑바닥을 완전히 탈출한 자원들은 가방(배열)에서 즉시 삭제하여 메모리 보호
+		items = items.filter(it => it.y <= GAME_HEIGHT);
+
+		// 2. 처음 0.6초 동안은 제자리에서 추진력을 모으고, 그 이후 하늘 위로 폭풍 가속 탈출!
+		if (warpTimer > 0.6) {
+			let accel = (warpTimer - 0.6) * 2200; // 가속도 법칙 적용
+			player.y -= accel * dt;
+		}
+
+		// 3. 기체가 화면 상단 바깥(-100px)으로 완전히 탈출 성공했는가?
+		if (player.y < -100) {						
+			if (typeof STAGE_DATA !== 'undefined' && currentLevel <= STAGE_DATA.length) {
+				resetStage();
+			} else {
+				gameState = 'CLEAR';
+			}
+		}
+		return; // 워프 연출 중에는 아래쪽 인게임 연산을 건너뛰네!
+	}
+	
     if (gameState !== 'PLAY') return;
     if (!(activeItems.timeStop > 0)) {
         elapsedTime += dt * 1000;
@@ -1508,7 +1579,7 @@ function draw() {
 		
         ctx.restore(); return;
     }
-    if (gameState === 'PLAY' || gameState === 'TRANSITION' || gameState === 'FAIL' || gameState === 'INPUT' || gameState === 'CRASHED') {
+	if (gameState === 'PLAY' || gameState === 'TRANSITION' || gameState === 'FAIL' || gameState === 'INPUT' || gameState === 'CRASHED' || gameState === 'WARP') {
         ctx.save(); if (gameState === 'INPUT' || gameState === 'CRASHED') ctx.globalAlpha = (gameState === 'CRASHED' ? 1.0 : 0.3);
         ctx.fillStyle = '#fff'; ctx.font = 'bold 24px "Neo Dunggeunmo"'; ctx.textAlign = 'left'; ctx.fillText(`LV: ${currentLevel}`, 20, 30);
         ctx.textAlign = 'center'; ctx.fillText(`SCORE: ${score}`, GAME_WIDTH / 2, 30); ctx.textAlign = 'right'; ctx.fillStyle = '#cccccc';
@@ -1648,6 +1719,26 @@ function draw() {
 			}
 			ctx.save(); 
 			if (!isDragging && gameState === 'PLAY') ctx.globalAlpha = 0.7;
+
+		if (gameState === 'WARP') {
+                ctx.save();
+                // 비행기 꽁무니 좌표(player.x, player.y)를 시작점으로 아래 방향으로 길게 그라데이션 형성
+                let grad = ctx.createLinearGradient(player.x, player.y + 10, player.x, player.y + 500);
+                grad.addColorStop(0, 'rgba(255, 255, 255, 1.0)');  // 시작점은 눈부신 100% 순백광!
+                grad.addColorStop(0.2, 'rgba(180, 180, 180, 0.5)'); // 중간은 차분한 연회색 네온
+                grad.addColorStop(1, 'rgba(0, 0, 0, 0)');          // 끝단은 우주 암흑 속으로 소멸
+
+                ctx.fillStyle = grad;
+                ctx.beginPath();
+                // 비행기 뒤편으로 웅장하게 펼쳐지는 역삼각형 구조의 쐐기형 에너지 테일 형성
+                ctx.moveTo(player.x - 15, player.y + 10);
+                ctx.lineTo(player.x + 15, player.y + 10);
+                ctx.lineTo(player.x + 35, player.y + 500);
+                ctx.lineTo(player.x - 35, player.y + 500);
+                ctx.closePath();
+                ctx.fill();
+                ctx.restore();
+            }
 
 			ctx.translate(player.x, player.y);
 
