@@ -16,8 +16,10 @@
 			font-weight: normal;
 			font-style: normal;
 		}
-        body { margin: 0; overflow: hidden; background-color: #222; touch-action: none; user-select: none; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: 'Neo Dunggeunmo', monospace; }
-        canvas { display: block; box-shadow: 0 0 20px rgba(170, 170, 170, 0.15); background-color: #000; }
+        
+		body { margin: 0; overflow: hidden; background-color: #000; touch-action: none; user-select: none; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: 'Neo Dunggeunmo', monospace; }
+        canvas { display: block; box-shadow: 0 0 20px rgba(170, 170, 170, 0.15); background-color: transparent; }
+		
         #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; display: flex; flex-direction: column; justify-content: center; align-items: center; }
         #message-box { 
 			text-align: center; 
@@ -78,8 +80,8 @@
 <div id="ui-layer">
     <div id="message-box">
         <h1 id="main-title">MATH SAVE THE EARTH</h1>
-        <p id="sub-text">[ CLICK TO START ]</p>
-    </div>
+        <p id="sub-text">[ CLICK TO START ]</p>		
+	</div>
 
     <div id="highscore-input" class="hidden">
         <h2 style="color:#ffffff; margin-top:0;">NEW GLOBAL RECORD!</h2>
@@ -113,7 +115,6 @@ const submitBtn = document.getElementById('submit-btn');
 const GAME_WIDTH = 600;
 const GAME_HEIGHT = 1000;
 let scale = 1, canvasOffsetX = 0, canvasOffsetY = 0;
-
 let gameState = 'START'; 
 let isDragging = false;
 let lastTime = 0, elapsedTime = 0;
@@ -121,6 +122,19 @@ let stageClearTimer = 0;
 let crashTimer = 0; 
 let warpTimer = 0;
 let pickupTimer = 0; 
+
+// === [광고 기능 구현 STEP 1] 타이틀 화면 테스트용 광고 변수 선언 ===
+let titleAdImg = new Image();
+let isTitleAdLoaded = false;
+
+// 💡 [로건의 무적 치트키]: 이미지를 텍스트 데이터로 치환하여 CORS와 로컬 실행 보안을 100% 우회하네!
+titleAdImg.src = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMDAiIGhlaWdodD0iMTUwIiB2aWV3Qm94PSIwIDAgMzAwIDE1MCI+PHJlY3Qgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgZmlsbD0iIzE1MTUxYyIvPjxyZWN0IHg9IjEwIiB5PSIxMCIgd2lkdGg9IjI4MCIgaGVpZ2h0PSIxMzAiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIxIiBzdHJva2UtZGFzaGFycmF5PSI0Ii8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGRvbWluYW50LWJhc2VsaW5lPSJtaWRkbGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmZmYiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMjAiIGZvbnQtd2VpZ2h0PSJib2xkIiBsZXR0ZXItc3BhY2luZz0iMiI+U09OWSBQbGF5U3RhdGlvbjwvdGV4dD48dGV4dCB4PSI1MCUiIHk9IjgwJSIgZG9taW5hbnQtYmFzZWxpbmU9Im1pZGRsZSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzg4OCIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgbGV0dGVyLXNwYWNpbmc9IjEiPkxJVkUgSU4gWU9VUiBXT1JMRC4gUExBWSBJTiBPVVJTLjwvdGV4dD48L3N2Zz4=";
+
+// 비동기 로딩이 완료되면 플래그를 true로 전환하여 캔버스 에러를 방어하네.
+titleAdImg.onload = function() {
+    isTitleAdLoaded = true;
+};
+
 const PICKUP_COOLDOWN = 0.2; 
 
 const TIME_SCALE = 0.5; 
@@ -544,6 +558,9 @@ let bullets = [], enemies = [], items = [], particles = [];
 let enemySpawnData = [];
 let tailPositions = [];
 let lastSpawnNum = 0, lastSpawnSym = 0, numCounter = 1; symIndex = 0;
+let ads = []; 
+let gameAdImgSrc = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMDAiIGhlaWdodD0iMTUwIiB2aWV3Qm94PSIwIDAgMzAwIDE1MCI+PHJlY3Qgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgZmlsbD0iIzExMSIvPjxjaXJjbGUgY3g9IjE1MCIgY3k9Ijc1IiByPSIyMCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmIiBzdHJva2Utd2lkdGg9IjQiIHN0cm9rZS1kYXNoYXJyYXk9IjMxLjQgMzEuNCI+PGFuaW1hdGVUcmFuc2Zvcm0gYXR0cmlidXRlTmFtZT0idHJhbnNmb3JtIiB0eXBlPSJyb3RhdGUiIGZyb209IjAgMTUwIDc1IiB0bz0iMzYwIDE1MCA3NSIgZHVyPSIxLjVzIiByZXBlYXRDb3VudD0iaW5kZWZpbml0ZSIvPjwvY2lyY2xlPjwvc3ZnPg==";
+let gameAdSpeed = 90;
 
 // --- INITIALIZATION ---
 function resize() {
@@ -737,7 +754,7 @@ function resetStage() {
     document.body.style.cursor = 'none';
 	player.x = GAME_WIDTH / 2; player.y = GAME_HEIGHT - 150;
     elapsedTime = 0; stageClearTimer = 0; crashTimer = 0; pickupTimer = 0;
-    player.expr = ""; bullets = []; enemies = []; items = []; particles = [];
+    player.expr = ""; bullets = []; enemies = []; items = []; particles = []; ads = [];
 	currentEnemySpeed = ENEMY_BASE_SPEED;
     currentSymbols = [];
     currentNumbers = [];
@@ -1153,6 +1170,29 @@ function update(dt) {
 					});
                 }
 				
+				// === [인게임 광고 구현 STEP 2] 'AD' 명령어를 만나면 고정 속도/유리체력 광고판 투하 ===
+                else if (data.type === 'AD') {
+                    const colWidth = GAME_WIDTH / 7;
+                    // 자네가 정한 7 그리드 시스템(col)을 기반으로 정확한 중심 X 좌표를 계산하네.
+                    const xPos = (data.col - 1) * colWidth + (colWidth / 2);
+                    
+                    let width = 300;   // 우리가 합의한 300x150 규격 고정
+                    let height = 150;
+                    let fixedFallSpeed = gameAdSpeed;
+                    
+                    ads.push({
+                        x: xPos - width / 2,
+                        y: -200,                // 화면 위쪽 외곽 숨은 곳에서 스폰
+                        width: width,
+                        height: height,
+                        vx: 0,                  // 나중에 퉁퉁 튕길 때 사용할 좌우 물리 속도
+                        vy: fixedFallSpeed,     // 독자적인 고정 하강 속도 주입
+                        hp: 1,                  // 💡 기획 4번 규칙: 총알 한 발에 터지는 유리체력 HP 1
+                        isRealized: false,       // 💡 기획 2번 규칙: 특정 고도 전에는 무적 상태를 판별할 플래그라네
+						imgSrc: gameAdImgSrc
+                    });
+                }
+				
 			} else {
 				// 적 소환 (currentEnemySpeed 적용)
 				let width = data.isBoss ? 150 : ENEMY_WIDTH; 
@@ -1311,7 +1351,77 @@ function update(dt) {
         }
         if (it.y > GAME_HEIGHT) items.splice(i, 1);
     }
-    
+	
+	// === [인게임 광고 구현 STEP 3] 광고판 이동, 실체화 고도 판정, 화면 탈출 처리 ===
+	
+	for (let i = ads.length - 1; i >= 0; i--) {
+        let ad = ads[i];
+
+        // 💡 [추가] 0.3초 재충돌 방지를 위한 쿨타임 타이머 실시간 차감 연산일세.
+        if (ad.hitCooldown > 0) {
+            ad.hitCooldown -= dt;
+        }
+
+        // 물리 이동 연산
+        ad.y += ad.vy * dt;
+        ad.x += ad.vx * dt;
+
+        // 중력 가속도 회로: 쳐올려진 광고판이 다시 아래로 떨어지게 만드는 힘
+        if (ad.vy < gameAdSpeed) {
+            ad.vy += 450 * dt; 
+            if (ad.vy > gameAdSpeed) ad.vy = gameAdSpeed; // 원래 고정 속도로 복귀
+        }
+
+        // 광고판이 좌우 경계를 뚫고 나가지 못하도록 가두고 벽 바운스 연산
+        if (ad.x < 0) {
+            ad.x = 0;
+            ad.vx = -ad.vx * 0.5; // 벽에 부딪히면 50%의 힘으로 반사 튕김
+        } else if (ad.x > GAME_WIDTH - ad.width) {
+            ad.x = GAME_WIDTH - ad.width;
+            ad.vx = -ad.vx * 0.5;
+        }
+
+        ad.vx *= 0.95; // 마찰력
+
+        // 고도 실체화 판정
+        if (!ad.isRealized && ad.y >= 500) {
+            ad.isRealized = true;
+        }
+
+        // 💡 [수정] 광고판이 실체화되었고, 충돌 쿨타임이 완전히 끝났을 때만 정밀 충돌 판정을 가동하네!
+        if (ad.isRealized && (!ad.hitCooldown || ad.hitCooldown <= 0)) {
+            let adCenterX = ad.x + ad.width / 2;
+            let adCenterY = ad.y + ad.height / 2;
+            
+            // 가로/세로 영역 안으로 기체가 진입했는지 기본 히트박스 판정
+            if (Math.abs(adCenterX - player.x) < (ad.width / 2 + 30) && 
+                Math.abs(adCenterY - player.y) < (ad.height / 2 + 30)) {
+                
+                // [충돌 위치별 Y축 가속도 분기]
+                if (player.y > adCenterY) {
+                    // 비행기가 광고판 중심보다 아래에 있을 때: 하늘 위로 포물선 반발 사출 (-400)
+                    ad.vy = -400; 
+                } else {
+                    // 비행기가 광고판 중심보다 위에 있을 때: 화면 아래로 강하게 사출 (600)
+                    ad.vy = 600; 
+                }
+                
+                // 옆으로 비껴 튕겨나가는 수평(X축) 가속도 연산
+                ad.vx = (adCenterX - player.x) * 2; 
+                
+                // 💡 [핵심 추가] 충돌 직후 0.3초간 히트박스를 완전히 잠가버려서 중복 트리거 버그를 원천 봉쇄하네!
+                ad.hitCooldown = 0.3;
+                
+                SoundManager.playBlockSound();
+            }
+        }
+
+        // 화면 탈출 처리
+        if (ad.y > GAME_HEIGHT) {
+            ads.splice(i, 1);
+        }
+    }
+	   
     for (let i = enemies.length - 1; i >= 0; i--) {
         let en = enemies[i];
 
@@ -1338,6 +1448,55 @@ function update(dt) {
         let b = bullets[i]; 
         b.y -= b.speed * dt;
         let bulletDestroyed = false; // [로건의 보너스] 총알이 삭제되었는지 기억하는 안전장치!
+		
+		// 💡 [추가] 총알과 광고판의 실시간 피격 충돌 연산 구역일세!
+        for (let j = ads.length - 1; j >= 0; j--) {
+            let ad = ads[j];
+            
+            // 광고판이 실체화 상태이고, 총알이 광고판의 사각형 영역 내부로 진입했는가?
+            if (ad.isRealized && b.x > ad.x && b.x < ad.x + ad.width && b.y > ad.y && b.y < ad.y + ad.height) {
+                
+                // 관통 탄환 아이템 활성화 시 중복 피격 방지 명부 가동
+                if (b.isPiercing && b.hitList.has(ad)) continue;
+                if (b.isPiercing) b.hitList.add(ad);
+                
+                ad.hp -= 1; // 기획에 명시된 단 1발에 터지는 유리체력 HP 1 반영
+                
+                if (ad.hp <= 0) {
+                    // 짜릿한 파괴 연출용 중형 폭발과 텍스트 생성
+                    spawnExplosion(ad.x + ad.width / 2, ad.y + ad.height / 2, 'medium', "", 1, 1);
+                    
+                    // 🎲 네 가지 특수 아이템 풀(Pool)에서 완벽하게 무작위로 하나를 선택하네!
+                    const itemPool = ['EASY_BUSY', 'HEAVY_ROTATION', 'TIME_STOP', 'PENETRATION'];
+                    const chosenItem = itemPool[Math.floor(Math.random() * itemPool.length)];
+                    
+                    // 파괴된 광고판의 정중앙 좌표에서 특별 보급 상자 사출!
+                    items.push({ 
+                        type: 'special', 
+                        val: chosenItem, 
+                        x: ad.x + ad.width / 2, 
+                        y: ad.y + ad.height / 2, 
+                        speed: 150 
+                    });
+                    
+                    // 화면 뒤에 오버레이되어 떠 있던 진짜 HTML 껍데기 엘리먼트 즉시 증발
+                    if (ad.element) ad.element.remove();
+                    
+                    // 광고판 가방(배열)에서 완전히 제거
+                    ads.splice(j, 1);
+                }
+                
+                // 관통 탄환이 아닐 경우 총알을 즉시 소멸시키고 적 충돌 검사 패스
+                if (!b.isPiercing) {
+                    bullets.splice(i, 1);
+                    bulletDestroyed = true;
+                    break;
+                }
+            }
+        }
+
+        // 💡 [안전장치 추가] 총알이 광고판을 맞춰 이미 소멸했다면, 아래 적 충돌 검사는 건너뛰어야 하네!
+        if (bulletDestroyed) continue;
 
         for (let j = enemies.length - 1; j >= 0; j--) {
             let en = enemies[j];
@@ -1488,10 +1647,10 @@ function update(dt) {
 }
 
 function draw() {
-    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
-    drawStars();
+    ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+	drawStars();
     ctx.strokeStyle = '#333'; ctx.lineWidth = 2; ctx.strokeRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
-		
+
 	if (gameState === 'PLAY') {
 		// 하늘에서 내려오는 모든 스크롤 메시지 배열을 순회하네.
 		scrollingTexts.forEach(txt => {
@@ -1525,6 +1684,7 @@ function draw() {
 	}	
 	
     if (gameState === 'LEADERBOARD' || gameState === 'UPLOADING') {
+		document.querySelectorAll('.ingame-ad').forEach(el => el.remove());
         ctx.save(); ctx.fillStyle = '#ffffff'; ctx.font = 'bold 40px "Neo Dunggeunmo"'; ctx.textAlign = 'center';
         ctx.fillText("GLOBAL RANKING", GAME_WIDTH/2, 100); ctx.fillStyle = '#bbbbbb'; ctx.font = '24px "Neo Dunggeunmo"';
         ctx.fillText(`YOUR SCORE: ${score}`, GAME_WIDTH/2, 150);
@@ -1579,6 +1739,7 @@ function draw() {
 		
         ctx.restore(); return;
     }
+	
 	if (gameState === 'PLAY' || gameState === 'TRANSITION' || gameState === 'FAIL' || gameState === 'INPUT' || gameState === 'CRASHED' || gameState === 'WARP') {
         ctx.save(); if (gameState === 'INPUT' || gameState === 'CRASHED') ctx.globalAlpha = (gameState === 'CRASHED' ? 1.0 : 0.3);
         ctx.fillStyle = '#fff'; ctx.font = 'bold 24px "Neo Dunggeunmo"'; ctx.textAlign = 'left'; ctx.fillText(`LV: ${currentLevel}`, 20, 30);
@@ -1765,6 +1926,53 @@ function draw() {
 		
         ctx.restore();
     }
+	
+	// === [인게임 광고 구현 STEP 4] 캔버스 위에 HTML GIF 광고판 동기화 렌더링 ===
+    // 1. 현재 브라우저 화면에 떠 있는 모든 광고 DOM 요소에 '미확인' 임시 표식을 남기네.
+    const existingAdElements = document.querySelectorAll('.ingame-ad');
+    existingAdElements.forEach(el => el.dataset.verified = "false");
+
+    // 현재 브라우저 창에서 캔버스가 정중앙 어디에 위치해 있는지 실제 스크린 좌표를 계산하네.
+    const canvasRect = canvas.getBoundingClientRect();
+
+    // 2. 현재 활성화된 ads 배열을 순회하며 HTML 엘리먼트를 매핑하고 좌표를 동기화하네.
+    ads.forEach(ad => {
+        // 아직 DOM 엘리먼트가 생성되지 않았다면 최초 1회만 생성하네 (GIF 연속 재생 유지 목적)
+        if (!ad.element) {
+            const img = document.createElement('img');
+            img.src = ad.imgSrc;
+            img.className = 'ingame-ad';
+            img.style.position = 'absolute';
+            img.style.width = ad.width + 'px';
+            img.style.height = ad.height + 'px';
+            img.style.pointerEvents = 'none'; // 💡 유저의 마우스 클릭이나 조작을 방해하지 않게 차단하네.
+			img.style.border = '2px solid #aaa';
+            img.style.boxSizing = 'border-box';
+            img.style.zIndex = '-1';          // 💡 캔버스 뒷면(배경)으로 배치하네.
+            document.body.appendChild(img);
+            ad.element = img;
+        }
+
+        // 실시간 좌표 매핑 (브라우저 절대 좌표 = 캔버스 시작점 + 게임 내부 좌표)
+		ad.element.style.left = (canvasRect.left + ad.x * scale) + 'px';
+        ad.element.style.top = (canvasRect.top + ad.y * scale) + 'px';
+        ad.element.style.width = (ad.width * scale) + 'px';
+        ad.element.style.height = (ad.height * scale) + 'px';
+
+        // 💡 기획 2번 규칙 시각화: Y고도 100 미만인 안전 진입 단계(유령 상태)일 때는 반투명, 실체화 후엔 선명하게!
+        ad.element.style.opacity = ad.isRealized ? '1.0' : '0.4';
+
+        // 확인 도장 쾅! (배열에 살아있는 녀석임을 증명)
+        ad.element.dataset.verified = "true";
+    });
+
+    // 3. 전 단계(STEP 3)에서 화면을 탈출해 배열에서 삭제된 광고판들의 찌꺼기 DOM 요소들을 깨끗하게 청소하네.
+    existingAdElements.forEach(el => {
+        if (el.dataset.verified === "false") {
+            el.remove();
+        }
+    });
+	
 }
 function gameLoop(currentTime) {
     const dt = (currentTime - lastTime) / 1000;
