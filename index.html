@@ -561,6 +561,7 @@ let lastSpawnNum = 0, lastSpawnSym = 0, numCounter = 1; symIndex = 0;
 let ads = []; 
 let gameAdImgSrc = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMDAiIGhlaWdodD0iMTUwIiB2aWV3Qm94PSIwIDAgMzAwIDE1MCI+PHJlY3Qgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgZmlsbD0iIzExMSIvPjxjaXJjbGUgY3g9IjE1MCIgY3k9Ijc1IiByPSIyMCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmIiBzdHJva2Utd2lkdGg9IjQiIHN0cm9rZS1kYXNoYXJyYXk9IjMxLjQgMzEuNCI+PGFuaW1hdGVUcmFuc2Zvcm0gYXR0cmlidXRlTmFtZT0idHJhbnNmb3JtIiB0eXBlPSJyb3RhdGUiIGZyb209IjAgMTUwIDc1IiB0bz0iMzYwIDE1MCA3NSIgZHVyPSIxLjVzIiByZXBlYXRDb3VudD0iaW5kZWZpbml0ZSIvPjwvY2lyY2xlPjwvc3ZnPg==";
 let gameAdSpeed = 90;
+let supportBeams = [];
 
 // --- INITIALIZATION ---
 function resize() {
@@ -945,17 +946,35 @@ function fireBullet() {
     if (isNaN(player.expr[player.expr.length - 1])) player.expr = player.expr.slice(0, -1);
     if (player.expr === "") return;
     
+    // 💡 [1단계 수정] 관통 아이템(penetration) 여부 확인
     let isPiercing = activeItems.penetration > 0;
-    
-    // ▼ 잔해 없이 깔끔하게 조립된 철갑탄 장전기!
-    bullets.push({ 
-        x: player.x, 
-        y: player.y - 40, 
-        text: player.expr, 
-        speed: isPiercing ? 2400 : 1200, 
-        isPiercing: isPiercing,       
-        hitList: new Set()            
-    });
+
+    if (isPiercing) {
+	
+		bullets.push({ 
+            x: player.x, 
+            y: player.y - 40, 
+            text: player.expr, 
+            speed: 1200,        // 일반 탄속
+            isPiercing: false,   // 일반 탄환 규격으로 발사
+            hitList: new Set()
+        });
+	
+        // [새 기획] 관통 아이템 발동 시 지원사격 함수 호출
+        triggerSupportFire(player.expr);
+        // 1회성 아이템이므로 소멸
+        activeItems.penetration = 0;
+    } else {
+        // 기존의 일반 탄환 발사 로직 그대로 유지
+        bullets.push({ 
+            x: player.x, 
+            y: player.y - 40, 
+            text: player.expr, 
+            speed: 1200, 
+            isPiercing: false,
+            hitList: new Set()
+        });
+    }
 
     // ▼ 파티클 로직 (그대로 유지)
     for(let i = 0; i < 5; i++) {
@@ -975,6 +994,67 @@ function fireBullet() {
 	if (!(activeItems.heavyRotation > 0)) {
         player.expr = "";
     }
+}
+
+function triggerSupportFire(firedText) {
+    const colWidth = GAME_WIDTH / 7;
+    let columns = [0, 1, 2, 3, 4, 5, 6].sort(() => Math.random() - 0.5);
+    
+    let currentDelay = Math.random() * (2000 - 1000) + 1000;
+    
+    columns.forEach((colIndex, i) => {
+        const finalDelay = currentDelay;
+        const isFirstBeam = (i === 0);
+        const isLastBeam = (i === 6);
+        
+        let previewDur = 0.5; 
+        let activeDur = 0.4;  
+        let fadeDur = 0.3;    
+        
+        let previewMaxAlpha = 0.4;
+        let previewMaxWidth = 4;
+        
+        // 💡 [해결] 루프 '내부'에서 매 마디마다 새 주사위를 굴려 독립된 메모리를 확보하네!
+        let randomizedMaxWidth = Math.random() * (90 - 30) + 30;
+        
+        if (isFirstBeam) {
+            previewDur = 0.8; 
+            previewMaxAlpha = 0.6;  
+            previewMaxWidth = 2;    
+            
+            // 🎯 오직 첫 번째 바퀴(i === 0)일 때만 주사위 값을 60으로 강제 락 고정!
+            randomizedMaxWidth = 60; 
+        }
+        if (isLastBeam) {
+            fadeDur = 1.0; 
+        }
+        
+        setTimeout(() => {
+            supportBeams.push({
+                x: colIndex * colWidth + (colWidth / 2),
+                elapsed: 0,
+                state: 'PREVIEW',
+                hasFired: false,
+                text: firedText,
+                previewDur: previewDur,
+                activeDur: activeDur,
+                fadeDur: fadeDur,
+                previewMaxAlpha: previewMaxAlpha,
+                previewMaxWidth: previewMaxWidth,
+                maxLineWidth: randomizedMaxWidth // 안전하게 뱃속에 개별 캡처 완료
+            });
+        }, finalDelay);
+        
+        if (i === 0) {
+            currentDelay += Math.random() * (1300 - 1000) + 1000;
+        } else if (i === 1) {
+            currentDelay += Math.random() * (800 - 500) + 500;
+        } else if (i === 2) {
+            currentDelay += Math.random() * (600 - 300) + 300;
+        } else {
+            currentDelay += Math.random() * (400 - 100) + 100;
+        }
+    });
 }
 
 function spawnDebris(x, y, hp) {
@@ -1644,11 +1724,99 @@ function update(dt) {
             tailPositions[i].y += (targetY - tailPositions[i].y) * 15 * dt;
         }
     }
+	
+	// ==========================================
+    // 🛸 [2단계] HOLD ON, I'M COMING 지원사격 타임라인 업데이트
+    // ==========================================
+    for (let i = supportBeams.length - 1; i >= 0; i--) {
+        let beam = supportBeams[i];
+        beam.elapsed += dt;
+
+        // 💡 뱃속의 데이터를 꺼내 누적 타임라인 임계점 계산
+        let t1 = beam.previewDur;
+        let t2 = t1 + beam.activeDur;
+        let t3 = t2 + beam.fadeDur;
+
+        if (beam.elapsed < t1) {
+            beam.state = 'PREVIEW';
+        } else if (beam.elapsed < t2) {
+            beam.state = 'ACTIVE';
+
+            if (!beam.hasFired) {
+                let fireText = beam.text || "10"; 
+                bullets.push({
+                    x: beam.x,
+                    y: GAME_HEIGHT,
+                    text: fireText,
+                    speed: 3500,    
+                    isPiercing: true,
+                    isSupport: true, 
+                    hitList: new Set()
+                });
+                beam.hasFired = true; 
+                SoundManager.playBassExplosion(-1); 
+            }
+        } else if (beam.elapsed < t3) {
+            beam.state = 'FADE';
+        } else {
+            supportBeams.splice(i, 1);
+        }
+    }
 }
 
 function draw() {
     ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 	drawStars();
+	
+	// ==========================================
+    // ⚡ [3단계] HOLD ON, I'M COMING 애니메이션 레이저 렌더링
+    // ==========================================
+    supportBeams.forEach(beam => {
+        ctx.save();
+        
+        let alpha = 0;
+        let lineWidth = 0;
+
+        let t1 = beam.previewDur;
+        let t2 = t1 + beam.activeDur;
+
+        if (beam.state === 'PREVIEW') {
+            let progress = beam.elapsed / t1;
+            alpha = progress * beam.previewMaxAlpha;        
+            lineWidth = progress * beam.previewMaxWidth;      
+        } else if (beam.state === 'ACTIVE') {
+            let activeElapsed = beam.elapsed - t1;
+            let growDur = 0.12; 
+            
+            if (activeElapsed < growDur) {
+                let progress = activeElapsed / growDur;
+                alpha = 1.0;
+                lineWidth = beam.previewMaxWidth + (beam.maxLineWidth - beam.previewMaxWidth) * progress;
+            } else {
+                alpha = 1.0;                   
+                lineWidth = beam.maxLineWidth; // 💡 여기에 고정 수치 60이 남아있었다면 범인일세!             
+            }
+        } else if (beam.state === 'FADE') {
+            let progress = (beam.elapsed - t2) / beam.fadeDur;
+            alpha = 1.0 * (1 - progress);
+            lineWidth = beam.maxLineWidth * (1 - progress); // 💡 여기도 변수 연동 완료!
+        }
+
+        if (lineWidth > 0) {
+            ctx.strokeStyle = `rgba(255, 255, 255, ${alpha * 0.3})`;
+            ctx.lineWidth = lineWidth + 24; 
+            ctx.beginPath();
+            ctx.moveTo(beam.x, 0); ctx.lineTo(beam.x, GAME_HEIGHT); ctx.stroke();
+
+            ctx.strokeStyle = `rgba(255, 255, 255, ${alpha})`;
+            ctx.lineWidth = lineWidth;
+            ctx.beginPath();
+            ctx.moveTo(beam.x, 0); ctx.lineTo(beam.x, GAME_HEIGHT); ctx.stroke();
+        }
+        
+        ctx.restore();
+    });
+	
     ctx.strokeStyle = '#333'; ctx.lineWidth = 2; ctx.strokeRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
 	if (gameState === 'PLAY') {
@@ -1835,20 +2003,27 @@ function draw() {
             ctx.translate(b.x, b.y); 
             ctx.rotate(Math.PI / 2); 
             
-            // === [로건의 가시성 폴리싱: 순백색 탄환 + 검은색 테두리 그림자] ===
-            // 총알 글씨 자체는 요청하신 눈부신 흰색(#fff)으로 채우고!
-            ctx.fillStyle = '#fff'; 
-            ctx.font = 'bold 22px "Neo Dunggeunmo"'; // 가독성을 위해 bold 처리하고 크기도 슬쩍 키웠네.
-            ctx.textAlign = 'center'; 
-            ctx.textBaseline = 'middle';
+			if (b.isSupport) {
+				// 💡 [자네의 전술 반영]: 지원사격 전용 캔버스 셋업 완벽 격리!
+				ctx.fillStyle = '#000000';   
+				ctx.font = '22px "Neo Dunggeunmo"'; 
+				ctx.textAlign = 'center'; 
+				ctx.textBaseline = 'middle';
+				
+				ctx.fillText(b.text, 0, 0); // 테두리 없이 순검은색 칼각 텍스트만 출력!
+			} else {
+				// 일반 탄환용 캔버스 셋업 완벽 격리!
+				ctx.fillStyle = '#ffffff'; 
+				ctx.strokeStyle = '#000000';
+				ctx.lineWidth = 4;
+				ctx.font = 'bold 22px "Neo Dunggeunmo"'; 
+				ctx.textAlign = 'center'; 
+				ctx.textBaseline = 'middle';
 
-            // 화려한 이펙트나 적들 사이에서도 수식이 묻히지 않도록 진한 검은색 테두리를 칠해주네!
-            ctx.lineWidth = 4;
-            ctx.strokeStyle = '#000';
-            ctx.strokeText(b.text, 0, 0);
-            
-            // 최종적으로 흰색 글씨를 얹어 마무리!
-            ctx.fillText(b.text, 0, 0); 
+				ctx.strokeText(b.text, 0, 0);
+				ctx.fillText(b.text, 0, 0);
+			}
+
             ctx.restore(); 
         });
 				
