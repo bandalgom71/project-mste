@@ -553,6 +553,11 @@ fetchGlobalScores();
 const playerImgIdle = new Image();   playerImgIdle.src = 'assets/playership_idle.png';
 const playerImgFlame1 = new Image();  playerImgFlame1.src = 'assets/playership_flame1.png';
 const playerImgFlame2 = new Image();  playerImgFlame2.src = 'assets/playership_flame2.png';
+const itemImgPf10 = new Image(); itemImgPf10.src = 'assets/item_pf10.png';
+const itemImgWlol = new Image(); itemImgWlol.src = 'assets/item_wlol.png';
+const itemImgRlsp = new Image(); itemImgRlsp.src = 'assets/item_rlsp.png';
+const itemImgHoic = new Image(); itemImgHoic.src = 'assets/item_hoic.png';
+
 const player = { x: GAME_WIDTH / 2, y: GAME_HEIGHT - 150, width: 40, height: 40, expr: "" };
 let bullets = [], enemies = [], items = [], particles = [];
 let enemySpawnData = [];
@@ -1412,7 +1417,7 @@ function update(dt) {
 					}
 					else if (it.val === 'PENETRATION') {
 						activeItems.penetration = 15.0;
-						scrollingTexts.push({ lines: ["관통 탄환 장전!"], x: GAME_WIDTH / 2, y: it.y, speed: currentEnemySpeed, opacity: 1 });
+						// scrollingTexts.push({ lines: ["관통 탄환 장전!"], x: GAME_WIDTH / 2, y: it.y, speed: currentEnemySpeed, opacity: 1 });
 					}
 					
 					SoundManager.playItemGet('special');
@@ -1743,7 +1748,7 @@ function update(dt) {
             beam.state = 'ACTIVE';
 
             if (!beam.hasFired) {
-                let fireText = beam.text || "10"; 
+                let fireText = beam.text || "1"; 
                 bullets.push({
                     x: beam.x,
                     y: GAME_HEIGHT,
@@ -1753,7 +1758,7 @@ function update(dt) {
                     isSupport: true, 
                     hitList: new Set()
                 });
-                beam.hasFired = true; 
+                beam.hasFired = true; 	
                 SoundManager.playBassExplosion(-1); 
             }
         } else if (beam.elapsed < t3) {
@@ -1956,19 +1961,36 @@ function draw() {
                 ctx.font = '40px "Neo Dunggeunmo"';
                 ctx.fillText(it.val, 0, 0);
 
-            } else if (it.type === 'special') {
-                let color = '#999999';
-                
-				ctx.shadowColor = '#ffffff';
-                ctx.shadowBlur = 15;
-                ctx.fillStyle = color;
-                ctx.fillRect(-15, -15, 30, 30); // 30x30 사이즈 박스
+			} else if (it.type === 'special') {
+                // 💡 [로건의 픽셀 가드]: 브라우저가 이미지를 강제로 뭉개는 보간법을 꺼서, 거친 도트 맛을 살려내네!
+                const prevSmoothing = ctx.imageSmoothingEnabled;
+                ctx.imageSmoothingEnabled = false;
 
-                // 박스 위에 첫 글자 표시 (구분용)
-                ctx.shadowBlur = 0;
-                ctx.fillStyle = '#000000';
-                ctx.font = 'bold 16px Arial';
-                ctx.fillText(it.val[0], 0, 0);
+                // 아이템 데이터에 매칭되는 이미지 객체 타겟팅
+                let imgToDraw = null;
+                if (it.val === 'EASY_BUSY') imgToDraw = itemImgPf10;
+                else if (it.val === 'HEAVY_ROTATION') imgToDraw = itemImgWlol;
+                else if (it.val === 'TIME_STOP') imgToDraw = itemImgRlsp;
+                else if (it.val === 'PENETRATION') imgToDraw = itemImgHoic;
+
+                // 비동기 이미지 로딩이 완전히 끝났는지 검증 후 드로우!
+                if (imgToDraw && imgToDraw.complete && imgToDraw.naturalWidth !== 0) {
+                    // 💡 $64 \times 64$ 사이즈이므로, 중심점 정렬을 위해 절반 크기인 -32 오프셋을 주어 렌더링하네.
+                    ctx.drawImage(imgToDraw, -24, -24, 48, 48);
+                } else {
+                    // 예외 처리(Fail-safe): 만에 하나 이미지 로딩이 지연될 때 띄워둘 백업 네모 박스 회로 보존
+                    ctx.shadowColor = '#ffffff';
+                    ctx.shadowBlur = 15;
+                    ctx.fillStyle = '#999999';
+                    ctx.fillRect(-15, -15, 30, 30);
+                    ctx.shadowBlur = 0;
+                    ctx.fillStyle = '#000000';
+                    ctx.font = 'bold 16px Arial';
+                    ctx.fillText(it.val[0], 0, 0);
+                }
+
+                // 💡 꼬리 수식이나 다른 폰트 드로잉에 간섭하지 않도록 브라우저 옵션을 원래대로 복구하네.
+                ctx.imageSmoothingEnabled = prevSmoothing;
             }
             ctx.restore();
         });
