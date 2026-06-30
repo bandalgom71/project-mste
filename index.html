@@ -117,6 +117,10 @@ const GAME_HEIGHT = 1000;
 let scale = 1, canvasOffsetX = 0, canvasOffsetY = 0;
 let gameState = 'START'; 
 let isDragging = false;
+let pendingX = 0;
+let pendingY = 0;
+// 🛸 [로건의 예외 가드 스위치]: 기체 본체나 앞쪽을 누르면 true로 켜져서 모든 이동을 정지시키네!
+let isExceptionClick = false;
 let lastTime = 0, elapsedTime = 0;
 let stageClearTimer = 0;
 let crashTimer = 0; 
@@ -758,8 +762,15 @@ function startGame() {
 
 function resetStage() {
     gameState = 'PLAY'; messageBox.classList.add('hidden'); highscoreInput.classList.add('hidden');
-    document.body.style.cursor = 'none';
+    document.body.style.cursor = 'default';
 	player.x = GAME_WIDTH / 2; player.y = GAME_HEIGHT - 150;
+	
+	// 🛸 [로건의 고스트 워프 방벽]: 새 판이 짤릴 때 이전 매치의 잔상 좌표와 예외 마커를 완벽히 세척하네!
+    pendingX = player.x;
+    pendingY = player.y + 150; // targetY 연산(pendingY - 150) 시 정확히 제자리에 멈추도록 오프셋 싱크!
+    isDragging = false;
+    isExceptionClick = false;
+	
     elapsedTime = 0; stageClearTimer = 0; crashTimer = 0; pickupTimer = 0;
     player.expr = ""; bullets = []; enemies = []; items = []; particles = []; ads = [];
 	activeItems = { easyBusy: 0, penetration: 0, timeStop: 0, heavyRotation: 0 };
@@ -789,7 +800,7 @@ function startWarpDrive() {
     warpTimer = 0;
 	bullets = [];
     messageBox.classList.add('hidden'); // STAGE CLEAR 팝업창을 화면에서 즉시 숨기네!
-    document.body.style.cursor = 'none'; // 워프 연출 중에는 마우스 커서를 완전히 숨기네.
+    document.body.style.cursor = 'default'; // 워프 연출 중에는 마우스 커서를 완전히 숨기네.
 }
 
 function triggerStageFail() { gameState = 'FAIL'; messageBox.classList.remove('hidden'); mainTitle.innerText = "DEFENSE FAILED!"; subText.innerText = "RESTARTING STAGE..."; subText.style.color = '#888888'; SoundManager.stopBGM(); setTimeout(() => { resetStage(); }, 2000); }
@@ -814,30 +825,89 @@ function gameOver() {
 }
 function showLeaderboard() { gameState = 'LEADERBOARD'; messageBox.classList.add('hidden'); highscoreInput.classList.add('hidden'); }
 
-// --- INPUT & UPDATE ---
-window.addEventListener('mousedown', () => { 
-    SoundManager.resume(); // 터치할 때마다 사운드 엔진 즉시 수면 깨우기!
-    if (gameState === 'LEADERBOARD') startGame(); 
-    else if (gameState === 'PLAY') isDragging = true; 
+window.addEventListener('mousedown', (e) => { 
+    SoundManager.resume();
+    if (gameState === 'LEADERBOARD') startGame();
+    else if (gameState === 'PLAY') {
+        const pos = getGameCoordinates(e.clientX, e.clientY);
+        
+        // 🛸 기체 충돌박스 및 앞공역을 누르면 예외 처리 플래그 가동!
+        isExceptionClick = (
+            pos.x >= player.x - 50 && pos.x <= player.x + 50 &&
+            pos.y >= player.y - 100 && pos.y <= player.y + 40
+        );
+
+        if (!isExceptionClick) {
+            pendingX = pos.x;
+            pendingY = pos.y;
+        }
+        isDragging = false;
+    }
     else if (gameState === 'TRANSITION') {
-        // 🎯 [클릭 먹통 격파]: 클리어 화면에서는 마우스 화살표가 선명하게 보일 뿐만 아니라,
-        // 화면 캔버스 어디든 툭 클릭만 하면 픽셀 헌팅 없이 즉시 하이퍼 스페이스 워프 연출로 진입하네!
-        handleUiClick(); 
+        handleUiClick();
     }
 });
 
 window.addEventListener('touchstart', (e) => { 
-    SoundManager.resume(); // 모바일 터치 스타트 순간에도 엔진 깨우기!
-    if (gameState === 'LEADERBOARD') { e.preventDefault(); startGame(); } 
-    else if (gameState === 'PLAY') { e.preventDefault(); isDragging = true; } 
+    SoundManager.resume();
+    if (gameState === 'LEADERBOARD') { e.preventDefault(); startGame(); }
+    else if (gameState === 'PLAY') { 
+        e.preventDefault();
+        const touch = e.touches[0];
+        const pos = getGameCoordinates(touch.clientX, touch.clientY);
+        
+        // 🛸 모바일 터치 시에도 동일한 레이더 가동!
+        isExceptionClick = (
+            pos.x >= player.x - 50 && pos.x <= player.x + 50 &&
+            pos.y >= player.y - 100 && pos.y <= player.y + 40
+        );
+
+        if (!isExceptionClick) {
+            pendingX = pos.x;
+            pendingY = pos.y;
+        }
+        isDragging = false;
+    } 
 }, { passive: false });
+
 window.addEventListener('mouseup', () => { 
-    SoundManager.resume(); // 손가락을 뗄 때도 안전장치 가동!
-    if(gameState==='PLAY' && isDragging) { isDragging = false; fireBullet(); }
+    SoundManager.resume();
+    if (gameState === 'PLAY') {
+        // 🛸 비행기 주변을 누른 게 아니고, 드래그도 안 했다면 그제야 목표지로 사출!
+        if (!isExceptionClick && !isDragging) {
+            player.x = Math.max(30, Math.min(GAME_WIDTH - 30, pendingX));
+            
+            let targetY = pendingY - 150;
+            if (pendingY > GAME_HEIGHT - 120) {
+                let ratio = (pendingY - (GAME_HEIGHT - 120)) / 120;
+                targetY = (pendingY - 150) + (120 * ratio);
+            }
+            player.y = Math.max(50, Math.min(GAME_HEIGHT - 30, targetY));
+        }
+        isDragging = false;
+        isExceptionClick = false; // 다음 탭 입력을 위해 방벽 리셋
+        fireBullet();
+    }
 });
+
 window.addEventListener('touchend', () => { 
-    SoundManager.resume(); // 아이패드 터치 끝나는 순간 탄환 발사 및 사운드 유지!
-    if(gameState==='PLAY' && isDragging) { isDragging = false; fireBullet(); }
+    SoundManager.resume();
+    if (gameState === 'PLAY') {
+        // 🛸 모바일 탭 워프 가드 연동
+        if (!isExceptionClick && !isDragging) {
+            player.x = Math.max(30, Math.min(GAME_WIDTH - 30, pendingX));
+            
+            let targetY = pendingY - 150;
+            if (pendingY > GAME_HEIGHT - 120) {
+                let ratio = (pendingY - (GAME_HEIGHT - 120)) / 120;
+                targetY = (pendingY - 150) + (120 * ratio);
+            }
+            player.y = Math.max(50, Math.min(GAME_HEIGHT - 30, targetY));
+        }
+        isDragging = false;
+        isExceptionClick = false; 
+        fireBullet();
+    }
 });
 
 window.addEventListener('keydown', function(e) {
@@ -894,43 +964,51 @@ window.addEventListener('keydown', function(e) {
 }); // ⬅️ [로건의 픽스] 마감 괄호를 원래의 규격인 '});'로 안전하게 복구했네!
 
 window.addEventListener('mousemove', e => {
-    if (gameState !== 'PLAY') return; //
+    if (gameState !== 'PLAY') return;
 
-    // 1. 브라우저의 실제 물리 버튼 클릭 상태를 실시간 확인하네.
-    const isMouseReallyPressed = (e.buttons === 1);
-    isDragging = isMouseReallyPressed; //
+    // 호버 차단 (마우스 버튼을 안 누르고 움직이면 리턴)
+    if (e.buttons !== 1) {
+        isDragging = false;
+        isExceptionClick = false;
+        return;
+    }
+
+    // 🛸 예외 구역(비행기 주변)을 잡고 비비는 드래그는 즉시 무시하여 기체 고정!
+    if (isExceptionClick) return;
+
+    isDragging = true;
 
     let 계산X = e.clientX;
     let 계산Y = e.clientY;
 
-    // 2. [마우스 포인터 제어]: 오직 버튼다운(조작 중) 상태일 때만 마우스 포인터를 가상의 벽에 가두네!
-    if (isDragging) { //
-        const canvasMinX = canvasOffsetX;
-        const canvasMaxX = canvasOffsetX + GAME_WIDTH * scale;
-        const canvasMaxY = canvasOffsetY + GAME_HEIGHT * scale;
+    const canvasMinX = canvasOffsetX;
+    const canvasMaxX = canvasOffsetX + GAME_WIDTH * scale;
+    const canvasMaxY = canvasOffsetY + GAME_HEIGHT * scale;
 
-        계산X = Math.max(canvasMinX + 10, Math.min(canvasMaxX - 10, e.clientX));
-        계산Y = Math.min(canvasMaxY - 10, e.clientY); // 하단 바 탈출 차단!
-    } 
-    // ※ 버튼업 상태일 때는 계산X, 계산Y에 브라우저 원본 좌표를 그대로 흘려보내서 자유 탈출을 허용하네!
+    계산X = Math.max(canvasMinX + 10, Math.min(canvasMaxX - 10, e.clientX));
+    계산Y = Math.min(canvasMaxY - 10, e.clientY);
 
-    // 3. 가두거나 풀어준 마우스 좌표를 게임 내부 좌표계로 치환하네.
-    const pos = getGameCoordinates(계산X, 계산Y); //
-    player.x = Math.max(30, Math.min(GAME_WIDTH - 30, pos.x)); //
+    const pos = getGameCoordinates(계산X, 계산Y);
+    player.x = Math.max(30, Math.min(GAME_WIDTH - 30, pos.x));
     
-    // 4. [기체 제어 - 밀착 알고리즘 전면 적용]: 버튼다운이든 업이든 비행기는 무조건 바닥 끝까지 내려가야 하네!
     let targetY = pos.y - 150;
     if (pos.y > GAME_HEIGHT - 120) {
-        // 마우스가 하단 120px 구역으로 들어오면 비행기를 바닥 쪽으로 자석처럼 찰칵 밀착시키네.
         let ratio = (pos.y - (GAME_HEIGHT - 120)) / 120;
         targetY = (pos.y - 150) + (120 * ratio);
     }
-    
-    // 최종적으로 비행기가 화면 밑바닥(GAME_HEIGHT - 30)을 완전히 긁고 다닐 수 있게 리미트를 통일했네!
-    player.y = Math.max(50, Math.min(GAME_HEIGHT - 30, targetY)); 
+    player.y = Math.max(50, Math.min(GAME_HEIGHT - 30, targetY));
 });
 
-window.addEventListener('touchmove', e => { e.preventDefault(); updatePlayerPos(e.touches[0].clientX, e.touches[0].clientY); }, { passive: false });
+window.addEventListener('touchmove', e => { 
+    if (gameState !== 'PLAY') return;
+    e.preventDefault();
+    
+    // 🛸 모바일 터치 드래그 시에도 무반응 영역 홀딩 가드 연동!
+    if (isExceptionClick) return;
+    
+    isDragging = true;
+    updatePlayerPos(e.touches[0].clientX, e.touches[0].clientY);
+}, { passive: false });
 
 function updatePlayerPos(clientX, clientY) {
     if (gameState !== 'PLAY' || !isDragging) return;
