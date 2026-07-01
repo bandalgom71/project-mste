@@ -468,12 +468,34 @@ const SoundManager = {
 
 // --- VISUALS ---
 const stars = [];
-function initStars() { for (let i = 0; i < 100; i++) stars.push({ x: Math.random() * GAME_WIDTH, y: Math.random() * GAME_HEIGHT, size: Math.random() * 1.5 + 0.5, speed: Math.random() * 50 + 20, alpha: Math.random() * 0.5 + 0.3 }); }
+
+function initStars() { 
+    for (let i = 0; i < 100; i++) {
+        let cruisingSpeed = Math.random() * 50 + 20; // 20 ~ 70 사이의 원래 속도
+        stars.push({ 
+            x: Math.random() * GAME_WIDTH, 
+            y: Math.random() * GAME_HEIGHT, 
+            size: Math.random() * 1.5 + 0.5, 
+            speed: cruisingSpeed, 
+            baseSpeed: cruisingSpeed, // 💡 [핵심]: 원래 속도를 영구 각인!
+            alpha: Math.random() * 0.5 + 0.3 
+        }); 
+    }
+}
+initStars();
+
 function updateStars(dt) {     
     if (activeItems && activeItems.timeStop > 0) return; 
 
-    // (타임스톱이 아닐 때만 아래 코드가 실행되어 별이 움직이네)
     stars.forEach(s => { 
+        // 💡 인게임(PLAY) 상태이고, 별의 현재 속도가 원래 속도보다 빠를 때만 작동!
+        let targetBase = s.baseSpeed || 40;
+        if (gameState === 'PLAY' && s.speed > targetBase) {
+            // exponential decay 공식을 사용하여 1.6의 속도로 약 2.5초간 서서히 감속하네.
+            s.speed += (targetBase - s.speed) * 1.6 * dt; 
+            if (s.speed < targetBase) s.speed = targetBase; // 하한선 가드
+        }
+
         s.y += s.speed * dt; 
         if (s.y > GAME_HEIGHT) { s.y = 0; s.x = Math.random() * GAME_WIDTH; } 
     }); 
@@ -681,9 +703,31 @@ function generateLevel(levelNum) {
     const stageConfig = STAGE_DATA[levelNum - 1];
     if (!stageConfig) return []; 
     
-    if (stageConfig.spawnList) {
-        stageConfig.spawnList.forEach(unit => {
-            const t = unit.row * ROW_TIME + START_DELAY;
+    // if (stageConfig.spawnList) {
+        // stageConfig.spawnList.forEach(unit => {
+            // const t = unit.row * ROW_TIME + START_DELAY;
+			
+	if (stageConfig.spawnList) {
+		// 🛸 [로건의 정밀 물리 스폰 모듈]: 물리 간격 56px 유지를 위한 추적 장치 가동!
+		let accumulatedTime = START_DELAY; // 누적 타임라인 (초기 지연값 배후 장착)
+		let lastRow = 0;                    // 직전 적 기체의 행(Row) 포인터
+		let trackedSpeed = ENEMY_BASE_SPEED; // 전장 내부 속도 실시간 추적기 (기본 100)
+
+		stageConfig.spawnList.forEach(unit => {
+			// 📐 공식: (행 차이 * 56px 물리거리) / 현재 추적 중인 전장 속도 * 1000ms
+			const rowDiff = unit.row - lastRow;
+			const timeDiff = ((rowDiff * 60) / trackedSpeed) * 1000;
+			
+			accumulatedTime += timeDiff; // 시공간 타임라인에 정밀 역산된 시간 적재
+			lastRow = unit.row;          // 다음 연산을 위해 포인터 갱신
+
+			// ⚡ [중요 전술]: 계산 도중 SPEED 명령어 변경을 감지하면 즉시 추적 속도를 동적 전환!
+			if (unit.type === 'SPEED') {
+				trackedSpeed = unit.val;
+			}
+
+			const t = accumulatedTime; // 기존 엔진이 인식하던 변수 t에 칼각 동기화 완료!
+			
             
             // 1순위: 'type'이 있는 명령어(ITEM 등)를 먼저 체크!
             if (unit.type) {
@@ -766,24 +810,25 @@ function startGame() {
 function resetStage() {
     gameState = 'PLAY'; messageBox.classList.add('hidden'); highscoreInput.classList.add('hidden');
     document.body.style.cursor = 'default';
-	player.x = GAME_WIDTH / 2; player.y = GAME_HEIGHT - 150;
+    player.x = GAME_WIDTH / 2; player.y = GAME_HEIGHT - 150;
 	
-	// 🛸 [로건의 고스트 워프 방벽]: 새 판이 짤릴 때 이전 매치의 잔상 좌표와 예외 마커를 완벽히 세척하네!
+    // 🛸 [로건의 고스트 워프 방벽]: 새 판이 짤릴 때 이전 매치의 잔상 좌표와 예외 마커를 완벽히 세척하네!
     pendingX = player.x;
     pendingY = player.y + 150; // targetY 연산(pendingY - 150) 시 정확히 제자리에 멈추도록 오프셋 싱크!
     isDragging = false;
     isExceptionClick = false;
-	
+	    
     elapsedTime = 0; stageClearTimer = 0; crashTimer = 0; pickupTimer = 0;
     player.expr = ""; bullets = []; enemies = []; items = []; particles = []; ads = [];
-	activeItems = { easyBusy: 0, penetration: 0, timeStop: 0, heavyRotation: 0 };
-	currentEnemySpeed = ENEMY_BASE_SPEED;
+    activeItems = { easyBusy: 0, penetration: 0, timeStop: 0, heavyRotation: 0 };
+    currentEnemySpeed = ENEMY_BASE_SPEED;
     currentSymbols = [];
     currentNumbers = [];
-	scrollingTexts = [];
+    scrollingTexts = [];
     enemySpawnData = generateLevel(currentLevel);
     lastTime = performance.now(); 
 }
+
 function showLevelClearScreen() { 
     // 1. 암호화 세이브 기동
     SaveSystem.save(currentLevel, score, lives);
