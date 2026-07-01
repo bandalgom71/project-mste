@@ -1252,7 +1252,7 @@ function spawnExplosion(x, y, tier, textValue, damageVal, multiplier) {
 function update(dt) {
 	if (gameState === 'PAUSE') return;
 	// 🛸 [규칙 엄수]: 1초에 정확히 1회전(2 * Math.PI) 하도록 실시간 축적하네!
-	baseOrbitAngle += (2 * Math.PI * dt) / TIME_SCALE; 
+	baseOrbitAngle += (Math.PI * dt) / TIME_SCALE; 
     if (baseOrbitAngle > Math.PI * 2) {
         baseOrbitAngle -= Math.PI * 2; 
     }
@@ -1288,7 +1288,7 @@ function update(dt) {
 					let myIndex = currentActiveKeys.indexOf(key);
 
 					if (activeCount > 0 && myIndex !== -1) {
-						const ORBIT_RADIUS = 100; // 지휘관이 세팅한 대형 궤도폭 100 복포 고정
+						const ORBIT_RADIUS = 80; // 지휘관이 세팅한 대형 궤도폭 100 복포 고정
 						let angle = baseOrbitAngle + (myIndex * (2 * Math.PI / activeCount));
 						let spawnX = player.x + Math.cos(angle) * ORBIT_RADIUS;
 						let spawnY = player.y + Math.sin(angle) * ORBIT_RADIUS;
@@ -2335,30 +2335,59 @@ function draw() {
                 const prevSmoothing = ctx.imageSmoothingEnabled;
                 ctx.imageSmoothingEnabled = false;
 
-                activeBuffs.forEach((buff, index) => {
-                    let angle = baseOrbitAngle + (index * (2 * Math.PI / activeBuffs.length));
-                    let orbitX = player.x + Math.cos(angle) * ORBIT_RADIUS;
-                    let orbitY = player.y + Math.sin(angle) * ORBIT_RADIUS;
+				activeBuffs.forEach((buff, index) => {
+					let angle = baseOrbitAngle + (index * (2 * Math.PI / activeBuffs.length));
+					let orbitX = player.x + Math.cos(angle) * ORBIT_RADIUS;
+					let orbitY = player.y + Math.sin(angle) * ORBIT_RADIUS;
 
-                    ctx.save();
-                    ctx.translate(orbitX, orbitY); 
+					ctx.save();
+					ctx.translate(orbitX, orbitY); 
 
-                    // 🛸 [고전 아케이드 깜빡임 연출]: 관통이 아니고, 남은 시간이 3초 이하일 때 가동!
-                    if (buff.key !== 'penetration') {
-                        let timeLeft = activeItems[buff.key];
-                        
-                        if (timeLeft <= 3.0) {
-                            // 💡 소수점 타임라인을 고속 분할(10배속)하여 홀수/짝수 프레임마다 
-                            // 투명(0.15)과 불투명(1.0)을 칼각으로 스위칭하네! 오락실 특유의 탁탁 튀는 맛이 완벽 복구되지.
-                            ctx.globalAlpha = Math.floor(timeLeft * 5) % 2 === 0 ? 0.4 : 1.0;
-                        }
-                    }
+					// 🛸 [고전 아케이드 깜빡임 연출]: 기존 자네의 훌륭한 깜빡임 로직을 그대로 계승하네!
+					if (buff.key !== 'penetration') {
+						let timeLeft = activeItems[buff.key];
+						
+						if (timeLeft <= 3.0) {
+							// 소수점 타임라인을 고속 분할하여 깜빡이는 연출 유지
+							ctx.globalAlpha = Math.floor(timeLeft * 5) % 2 === 0 ? 0.4 : 1.0;
+						}
+					}
 
-                    if (buff.img.complete && buff.img.naturalWidth !== 0) {
-                        ctx.drawImage(buff.img, -24, -24, 48, 48);
-                    }
-                    ctx.restore();
-                });
+					// 🛸 [로건의 순정 흑백 고대비 프로토콜]: 유색 코드를 전면 배제하고 오직 글자(알파벳)로만 시인성을 극대화하네!
+					ctx.beginPath();
+					ctx.arc(0, 0, 15, 0, Math.PI * 2); // 반지름 15px의 선명한 정원
+					
+					// 바탕은 언제나 균일한 밝은 회색(#cccccc)으로 밀어버리네!
+					ctx.fillStyle = '#cccccc'; 
+					ctx.fill();
+					
+					ctx.strokeStyle = '#000000';
+					ctx.lineWidth = 2;
+					ctx.stroke();
+
+					let rawKey = buff.key ? String(buff.key).trim() : '?';
+					let shortcutLetter = rawKey.charAt(0).toUpperCase();
+
+					// 중앙 알파벳 각인 (선명한 흑색)
+					ctx.fillStyle = '#000000';
+					ctx.font = 'bold 24px "Neo Dunggeunmo"';
+					ctx.textAlign = 'center';
+					ctx.textBaseline = 'middle';
+					
+					ctx.shadowColor = 'transparent';
+					ctx.shadowBlur = 0;
+
+					let xOffset = 0.5; // 💡 1 또는 1.5, 혹은 2로 바꾸며 눈맛에 가장 완벽한 중앙을 찾으세!
+					let yOffset = 1.5; // 💡 세로축도 미세하게 안 맞으면 이 값을 음수나 양수로 미세 조절하게나.
+
+					// 기존 0, 0 지점에서 보정치(Offset)를 더해 최종 렌더링!
+					ctx.fillText(shortcutLetter, 0 + xOffset, 0 + yOffset);
+
+					ctx.restore();
+				});
+				
+				
+				
 
                 ctx.imageSmoothingEnabled = prevSmoothing;
             }
