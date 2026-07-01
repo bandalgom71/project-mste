@@ -828,6 +828,10 @@ function gameOver() {
 }
 function showLeaderboard() { gameState = 'LEADERBOARD'; messageBox.classList.add('hidden'); highscoreInput.classList.add('hidden'); }
 
+
+// =================================================================
+// 🛸 [로건의 조작계 통합 방화벽 - 사운드 완벽 동결 & 멜팅 버전]
+// =================================================================
 window.addEventListener('mousedown', (e) => { 
     SoundManager.resume();
     
@@ -835,6 +839,15 @@ window.addEventListener('mousedown', (e) => {
     if (gameState === 'PAUSE') {
         gameState = 'PLAY';
         justResumed = true;
+
+        // 🎵 [오디오 통합 재가동]: BGM을 이어서 틀고, 라디오 노이즈(0.03)도 다시 녹여내네!
+        if (SoundManager) {
+            if (SoundManager.currentBgm) {
+                SoundManager.currentBgm.currentTime = SoundManager.currentBgm.currentTime;
+                SoundManager.currentBgm.play().catch(() => {});
+            }
+            if (SoundManager.staticGain) SoundManager.staticGain.gain.value = 0.03;
+        }
         return;
     }
 
@@ -852,6 +865,13 @@ window.addEventListener('mousedown', (e) => {
             const now = performance.now();
             if (now - lastExceptionClickTime < 300) {
                 gameState = 'PAUSE';
+
+                // 🎵 [수동 포즈 대응]: 기체 더블클릭으로 수동 포즈 시에도 모든 오디오 동결!
+                if (SoundManager) {
+                    if (SoundManager.currentBgm) SoundManager.currentBgm.pause();
+                    if (SoundManager.staticGain) SoundManager.staticGain.gain.value = 0;
+                }
+
                 isExceptionClick = false;
                 isDragging = false;
                 return;
@@ -875,6 +895,15 @@ window.addEventListener('touchstart', (e) => {
     if (gameState === 'PAUSE') {
         gameState = 'PLAY';
         justResumed = true;
+
+        // 🎵 [오디오 통합 재가동]: 모바일 터치 복귀 시 사운드 전체 재개!
+        if (SoundManager) {
+            if (SoundManager.currentBgm) {
+                SoundManager.currentBgm.currentTime = SoundManager.currentBgm.currentTime;
+                SoundManager.currentBgm.play().catch(() => {});
+            }
+            if (SoundManager.staticGain) SoundManager.staticGain.gain.value = 0.03;
+        }
         return;
     }
 
@@ -894,6 +923,13 @@ window.addEventListener('touchstart', (e) => {
             const now = performance.now();
             if (now - lastExceptionClickTime < 300) {
                 gameState = 'PAUSE';
+
+                // 🎵 [수동 포즈 대응]: 모바일 기체 더블탭 포즈 시 모든 오디오 동결!
+                if (SoundManager) {
+                    if (SoundManager.currentBgm) SoundManager.currentBgm.pause();
+                    if (SoundManager.staticGain) SoundManager.staticGain.gain.value = 0;
+                }
+
                 isExceptionClick = false;
                 isDragging = false;
                 return;
@@ -906,6 +942,7 @@ window.addEventListener('touchstart', (e) => {
         isDragging = false;
     } 
 }, { passive: false });
+
 
 window.addEventListener('mouseup', () => { 
     SoundManager.resume();
@@ -1010,7 +1047,7 @@ window.addEventListener('keydown', function(e) {
             SoundManager.playBassExplosion(0);
         }
     }
-}); // ⬅️ [로건의 픽스] 마감 괄호를 원래의 규격인 '});'로 안전하게 복구했네!
+});
 
 window.addEventListener('mousemove', e => {
     if (gameState !== 'PLAY') return;
@@ -1058,6 +1095,31 @@ window.addEventListener('touchmove', e => {
     isDragging = true;
     updatePlayerPos(e.touches[0].clientX, e.touches[0].clientY);
 }, { passive: false });
+
+function initAutoPauseProtection() {
+    const triggerAutoPause = () => {
+        if (gameState === 'PLAY') {
+            gameState = 'PAUSE';
+            
+            // 🎵 [오디오 올스톱 방화벽]: BGM과 라디오 노이즈를 동시에 얼려버리네!
+            if (SoundManager) {
+                if (SoundManager.currentBgm) SoundManager.currentBgm.pause();
+                if (SoundManager.staticGain) SoundManager.staticGain.gain.value = 0;
+            }
+        }
+    };
+
+    window.addEventListener('blur', triggerAutoPause);
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden || document.visibilityState === 'hidden') {
+            triggerAutoPause();
+        }
+    });
+}
+
+// 락온 가동! 센서 활성화 회로 배치
+initAutoPauseProtection();
 
 function updatePlayerPos(clientX, clientY) {
     if (gameState !== 'PLAY' || !isDragging) return;
@@ -2377,8 +2439,8 @@ function draw() {
 					ctx.shadowColor = 'transparent';
 					ctx.shadowBlur = 0;
 
-					let xOffset = 0.5; // 💡 1 또는 1.5, 혹은 2로 바꾸며 눈맛에 가장 완벽한 중앙을 찾으세!
-					let yOffset = 1.5; // 💡 세로축도 미세하게 안 맞으면 이 값을 음수나 양수로 미세 조절하게나.
+					let xOffset = 0.5;
+					let yOffset = 1.5;
 
 					// 기존 0, 0 지점에서 보정치(Offset)를 더해 최종 렌더링!
 					ctx.fillText(shortcutLetter, 0 + xOffset, 0 + yOffset);
