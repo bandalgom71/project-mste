@@ -79,8 +79,7 @@
 
 <div id="ui-layer">
     <div id="message-box">
-        <h1 id="main-title">MATH SAVE THE EARTH</h1>
-        <p id="sub-text">[ CLICK TO START ]</p>		
+		<h1 id="main-title"></h1>        
 	</div>
 
     <div id="highscore-input" class="hidden">
@@ -116,6 +115,8 @@ const GAME_WIDTH = 600;
 const GAME_HEIGHT = 1000;
 let scale = 1, canvasOffsetX = 0, canvasOffsetY = 0;
 let gameState = 'START'; 
+const titleImage = new Image();
+titleImage.src = 'assets/titlebg.png';
 let isDragging = false;
 let pendingX = 0;
 let pendingY = 0;
@@ -485,39 +486,96 @@ function initStars() {
 initStars();
 
 function updateStars(dt) {     
-    if (activeItems && activeItems.timeStop > 0) return; 
+    if (activeItems && activeItems.timeStop > 0) return;
+
+    const centerX = GAME_WIDTH / 2;
+    const centerY = GAME_HEIGHT / 2 + 150; // 하단 지구 배치를 위한 650px 축 고정
 
     stars.forEach(s => { 
-        // 💡 인게임(PLAY) 상태이고, 별의 현재 속도가 원래 속도보다 빠를 때만 작동!
-        let targetBase = s.baseSpeed || 40;
-        if (gameState === 'PLAY' && s.speed > targetBase) {
-            // exponential decay 공식을 사용하여 1.6의 속도로 약 2.5초간 서서히 감속하네.
-            s.speed += (targetBase - s.speed) * 1.6 * dt; 
-            if (s.speed < targetBase) s.speed = targetBase; // 하한선 가드
+        // 💡 [지휘관의 기획 실장]: 별마다 독립된 진동 주기(1s~10s)와 최소 밝기 메모리 실시간 주입!
+        if (s.twinklePhase === undefined) {
+            s.twinklePhase = Math.random() * Math.PI * 2; // 무작위 시작 위상(Phase)
+            
+            // 1초 ~ 10초 사이의 랜덤 주기(T) 설정 -> 각속도(omega = 2*PI / T) 변환
+            let period = Math.random() * 3 + 0.4; 
+            s.twinkleSpeed = (Math.PI * 2) / period;
+            
+            // 최소 밝기 설정 (0.2에서 원래 별이 가진 고유 밝기 s.alpha 사이로 안전하게 제한)
+            s.minAlpha = Math.random() * (s.alpha - 0.2) + 0.2;
+            if (s.minAlpha > s.alpha) s.minAlpha = s.alpha * 0.5;
         }
 
-        s.y += s.speed * dt; 
-        if (s.y > GAME_HEIGHT) { s.y = 0; s.x = Math.random() * GAME_WIDTH; } 
+        // 1. 모든 상태(TITLE & INGAME)에서 공통으로 작동하는 실시간 알파값 사인파 진동 연산
+        s.twinklePhase += s.twinkleSpeed * dt;
+        let wave = (Math.sin(s.twinklePhase) + 1) / 2; // -1~1의 범위를 0~1 부드러운 곡선으로 정제
+        s.liveAlpha = s.minAlpha + (s.alpha - s.minAlpha) * wave; // 최소 밝기 ~ 원래 밝기 사이 진동
+
+        // 2. 타이틀 화면전용 방사형 주행 물리 엔진
+        if (gameState === 'START') {
+            if (s.angle === undefined || s.dist === undefined) {
+                s.angle = Math.atan2(s.y - centerY, s.x - centerX);
+                s.dist = Math.hypot(s.x - centerX, s.y - centerY);
+            }
+
+            let radialSpeed = (s.speed || 40) * 0.8;
+            s.dist += radialSpeed * dt;
+
+            s.x = centerX + Math.cos(s.angle) * s.dist;
+            s.y = centerY + Math.sin(s.angle) * s.dist;
+
+            if (s.x < 0 || s.x > GAME_WIDTH || s.y < 0 || s.y > GAME_HEIGHT) {
+                s.angle = Math.random() * Math.PI * 2;
+                s.dist = Math.random() * 30; 
+                s.x = centerX + Math.cos(s.angle) * s.dist;
+                s.y = centerY + Math.sin(s.angle) * s.dist;
+            }
+        } else {
+            // 3. 인게임 전용 수직 순항 물리 엔진
+            s.angle = undefined;
+            s.dist = undefined;
+
+            let targetBase = s.baseSpeed || 40;
+            if (gameState === 'PLAY' && s.speed > targetBase) {
+                s.speed += (targetBase - s.speed) * 1.6 * dt; 
+                if (s.speed < targetBase) s.speed = targetBase; 
+            }
+
+            s.y += s.speed * dt;
+            if (s.y > GAME_HEIGHT) { s.y = 0; s.x = Math.random() * GAME_WIDTH; }
+        }
     }); 
 }
 
 function drawStars() { 
     ctx.save(); 
     stars.forEach(s => { 
-        ctx.fillStyle = `rgba(255, 255, 255, ${s.alpha})`; 
-        ctx.strokeStyle = `rgba(255, 255, 255, ${s.alpha * 0.5})`;
-
         ctx.beginPath();
+        
+        // 안전 가드: 혹시라도 연산 전 빈 값이 들어올 경우 순정 알파값으로 대체하네.
+        let currentAlpha = s.liveAlpha !== undefined ? s.liveAlpha : s.alpha;
+
         if (gameState === 'WARP') {
-            // 🎯 [워프 스타라인]: '흑백 미학' 준수! 별의 현재 위치에서 위쪽으로 길게 뻗은 연회색 선을 그리네!
+            ctx.strokeStyle = `rgba(255, 255, 255, ${currentAlpha * 0.5})`;
             ctx.lineWidth = s.size * 1.5;
             ctx.moveTo(s.x, s.y);
-            ctx.lineTo(s.x, s.y - (s.speed * 0.08)); // 속도에 비례해서 광선이 길어지네.
+            ctx.lineTo(s.x, s.y - (s.speed * 0.08));
             ctx.stroke();
-        } else {
-            // 순정 상태일 때는 원래대로 이쁜 원형 점으로 렌더링하네.
+        } else if (gameState === 'START') {
+            let currentDist = s.dist || 0;
+            let finalSize = Math.min(2.3, s.size * (1.0 + currentDist / 500));
+
+            // 지휘관이 기획한 고대비 거듭제곱 필터에 실시간 트윙클 알파값을 결합!
+            let alphaScale = Math.pow(currentAlpha, 2.5) * 2.8 * (0.15 + currentDist / 400);
+            alphaScale = Math.max(0.04, Math.min(0.95, alphaScale)); // 완전히 꺼지지 않게 가드
+
+            ctx.fillStyle = `rgba(255, 255, 255, ${alphaScale})`;
+            ctx.arc(s.x, s.y, finalSize, 0, Math.PI * 2);
+            ctx.fill();
+        } else { 
+            // 인게임 플레이 중에도 별들이 각자의 주기대로 이쁘게 깜빡이도록 연동 완료!
+            ctx.fillStyle = `rgba(255, 255, 255, ${currentAlpha})`;  
             ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
-            ctx.fill(); 
+            ctx.fill();  
         }
     }); 
     ctx.restore(); 
@@ -586,6 +644,12 @@ const itemImgPf10 = new Image(); itemImgPf10.src = 'assets/item_pf10.png';
 const itemImgWlol = new Image(); itemImgWlol.src = 'assets/item_wlol.png';
 const itemImgRlsp = new Image(); itemImgRlsp.src = 'assets/item_rlsp.png';
 const itemImgHoic = new Image(); itemImgHoic.src = 'assets/item_hoic.png';
+const titleBgImg = new Image();    titleImage.src = 'assets/titlebg.png';
+const numsFarImg = new Image();    numsFarImg.src = 'assets/numbers_far.png';
+const numsMiddleImg = new Image(); numsMiddleImg.src = 'assets/numbers_middle.png';
+const numsCloseImg = new Image();  numsCloseImg.src = 'assets/numbers_close.png';
+
+mainTitle.innerText = "";
 
 const player = { x: GAME_WIDTH / 2, y: GAME_HEIGHT - 150, width: 40, height: 40, expr: "" };
 let bullets = [], enemies = [], items = [], particles = [];
@@ -784,24 +848,28 @@ function spawnForceNumbers(targetNumbers) {
     });
 }
 
-// function startGame() { SoundManager.init(); score = 0; currentLevel = 1; lives = 3; resetStage(); }
-function startGame() { 
-    SoundManager.init(); 
+function startGame(forceNew = false) { 
+    SoundManager.init();
 
-    // 🎯 [자네의 기획 2]: 브라우저 비밀 주머니를 열어 해독 가능한 이전 세이브 기록이 있는지 확인하네.
-    const savedRecord = SaveSystem.load();
+	// 💡 [지휘관의 보안 명령 반영]: START NEW GAME을 눌러 forceNew가 true로 들어오면,
+    // 우주 미아가 될 수 있는 기존 세이브 데이터를 로컬 스토리지에서 그 즉시 완벽하게 소멸시키네!
+    if (forceNew) {
+        SaveSystem.clear(); // 금고 영구 파쇄 회로 가동!
+    }
+    
+    const savedRecord = forceNew ? null : SaveSystem.load();
     
     if (savedRecord) {
-        // 저장된 기록이 있다면, 마지막으로 '클리어한 스테이지의 다음 스테이지'부터 점수와 목숨을 복구하네!
         currentLevel = savedRecord.lvl + 1; 
         score = savedRecord.scr;
         lives = savedRecord.lvs;
         console.log(`🛠️ [관제탑] 복호화 성공. 이전 작전 반경을 이어받아 레벨 ${currentLevel}부터 이어서 기동하네!`);
     } else {
-        // 기록이 아예 없거나 변조되어 파쇄되었다면, 순정 규격대로 1레벨 생짜 신입 출발!
+        // 새로 시작하거나 세이브가 없을 때의 순정 초기화 코스
         score = 0; 
         currentLevel = 1; 
         lives = 3; 
+        console.log(`🛠️ [관제탑] 새로운 작전 가동. 1스테이지부터 완전히 새로 출발하네!`);
     }
     
     resetStage(); 
@@ -873,19 +941,15 @@ function gameOver() {
 }
 function showLeaderboard() { gameState = 'LEADERBOARD'; messageBox.classList.add('hidden'); highscoreInput.classList.add('hidden'); }
 
-
 // =================================================================
-// 🛸 [로건의 조작계 통합 방화벽 - 사운드 완벽 동결 & 멜팅 버전]
+// 🛸 [로건의 조작계 통합 방화벽 - 메뉴 다층 락온 및 사운드 동결/멜팅 버전]
 // =================================================================
 window.addEventListener('mousedown', (e) => { 
     SoundManager.resume();
     
-    // 🛸 [일시정지 해제 통로]: 멈춘 상태에서 누르면 즉시 시공간 복귀 준비!
     if (gameState === 'PAUSE') {
         gameState = 'PLAY';
         justResumed = true;
-
-        // 🎵 [오디오 통합 재가동]: BGM을 이어서 틀고, 라디오 노이즈(0.03)도 다시 녹여내네!
         if (SoundManager) {
             if (SoundManager.currentBgm) {
                 SoundManager.currentBgm.currentTime = SoundManager.currentBgm.currentTime;
@@ -896,27 +960,37 @@ window.addEventListener('mousedown', (e) => {
         return;
     }
 
-    if (gameState === 'LEADERBOARD') startGame();
+    // 🛸 [로건의 시공간 복구 패치]: e.clientY 공급관을 다시 단단히 연결했네!
+    if (gameState === 'START') {
+        const pos = getGameCoordinates(e.clientX, e.clientY); 
+        
+        // 📐 1층 상자: TAP TO PLAY 구역 (Y고도 700 ~ 780)
+        if (pos.x >= 120 && pos.x <= 480 && pos.y >= 700 && pos.y <= 780) {
+            startGame(false); 
+        }
+        // 📐 2층 상자: START NEW GAME 구역 (Y고도 790 ~ 840)
+        else if (pos.x >= 120 && pos.x <= 480 && pos.y >= 790 && pos.y <= 840) {
+            if (localStorage.getItem('mste_sys_save') !== null) {
+                startGame(true);
+            }
+        }
+    }
+	
+	else if (gameState === 'LEADERBOARD') startGame(false);
     else if (gameState === 'PLAY') {
         const pos = getGameCoordinates(e.clientX, e.clientY);
-        
         isExceptionClick = (
             pos.x >= player.x - 50 && pos.x <= player.x + 50 &&
             pos.y >= player.y - 100 && pos.y <= player.y + 40
         );
-
         if (isExceptionClick) {
-            // 🛸 [더블클릭 정밀 레이더]: 0.3초 이내 연타 시 전장 즉시 동결!
             const now = performance.now();
             if (now - lastExceptionClickTime < 300) {
                 gameState = 'PAUSE';
-
-                // 🎵 [수동 포즈 대응]: 기체 더블클릭으로 수동 포즈 시에도 모든 오디오 동결!
                 if (SoundManager) {
                     if (SoundManager.currentBgm) SoundManager.currentBgm.pause();
                     if (SoundManager.staticGain) SoundManager.staticGain.gain.value = 0;
                 }
-
                 isExceptionClick = false;
                 isDragging = false;
                 return;
@@ -936,12 +1010,9 @@ window.addEventListener('mousedown', (e) => {
 window.addEventListener('touchstart', (e) => { 
     SoundManager.resume();
     
-    // 🛸 [모바일 일시정지 해제 통로]
     if (gameState === 'PAUSE') {
         gameState = 'PLAY';
         justResumed = true;
-
-        // 🎵 [오디오 통합 재가동]: 모바일 터치 복귀 시 사운드 전체 재개!
         if (SoundManager) {
             if (SoundManager.currentBgm) {
                 SoundManager.currentBgm.currentTime = SoundManager.currentBgm.currentTime;
@@ -952,33 +1023,46 @@ window.addEventListener('touchstart', (e) => {
         return;
     }
 
-    if (gameState === 'LEADERBOARD') { e.preventDefault(); startGame(); }
-    else if (gameState === 'PLAY') { 
+    // 🛸 [모바일 타이틀 2층 독립 좌표 저격망]
+    if (gameState === 'START') {
         e.preventDefault();
         const touch = e.touches[0];
         const pos = getGameCoordinates(touch.clientX, touch.clientY);
         
+        // 모바일 1층 상자: TAP TO PLAY
+        if (pos.x >= 120 && pos.x <= 480 && pos.y >= 700 && pos.y <= 780) {
+            startGame(false);
+        }
+		// 모바일 2층 상자: START NEW GAME
+        else if (pos.x >= 120 && pos.x <= 480 && pos.y >= 790 && pos.y <= 840) {
+            // 💡 모바일 환경에서도 세이브 흔적이 실존할 때만 격발 승인!
+            if (localStorage.getItem('mste_sys_save') !== null) {
+                startGame(true);
+			}
+		}
+	}
+    else if (gameState === 'LEADERBOARD') { e.preventDefault(); startGame(false); }
+    else if (gameState === 'PLAY') { 
+        e.preventDefault();
+        const touch = e.touches[0];
+        const pos = getGameCoordinates(touch.clientX, touch.clientY);
         isExceptionClick = (
             pos.x >= player.x - 50 && pos.x <= player.x + 50 &&
             pos.y >= player.y - 100 && pos.y <= player.y + 40
         );
-
         if (isExceptionClick) {
-            // 🛸 [더블탭 정밀 레이더]
             const now = performance.now();
             if (now - lastExceptionClickTime < 300) {
                 gameState = 'PAUSE';
-
-                // 🎵 [수동 포즈 대응]: 모바일 기체 더블탭 포즈 시 모든 오디오 동결!
                 if (SoundManager) {
                     if (SoundManager.currentBgm) SoundManager.currentBgm.pause();
                     if (SoundManager.staticGain) SoundManager.staticGain.gain.value = 0;
                 }
-
                 isExceptionClick = false;
                 isDragging = false;
                 return;
             }
+            lastTime = performance.now();
             lastExceptionClickTime = now;
         } else {
             pendingX = pos.x;
@@ -987,7 +1071,6 @@ window.addEventListener('touchstart', (e) => {
         isDragging = false;
     } 
 }, { passive: false });
-
 
 window.addEventListener('mouseup', () => { 
     SoundManager.resume();
@@ -1534,7 +1617,7 @@ function update(dt) {
 						height: height, 
 						hp: 1, // 보급선의 체력 (원하는 대로 조절하게)
 						maxHp: 1, 
-						speed: currentEnemySpeed * 0.8, // 일반 적보다 살짝 느리게
+						speed: currentEnemySpeed,
 						color: '#888888', // 황금색 테두리!
 						isBoss: false,
 						dropItem: data.val // ★ 핵심: 죽을 때 떨어뜨릴 아이템 이름을 뱃속에 기억시킴 ★
@@ -1632,7 +1715,7 @@ function update(dt) {
             if (currentNumbers.length > 0) {		
             // ▼ 삼항 연산자로 Easy-Busy 체크!
                 let randNum = (activeItems.easyBusy > 0) ? 10 : currentNumbers[Math.floor(Math.random() * currentNumbers.length)];
-                items.push({ type:'num', val:randNum, x:Math.random()*(GAME_WIDTH-60)+30, y:-40, speed:180 + Math.random()*60 }); 
+                items.push({ type:'num', val:randNum, x:Math.random()*(GAME_WIDTH-60)+30, y:-40, speed:150 + Math.random()*90 }); 
             }
             lastSpawnNum = 0;
         }
@@ -1660,7 +1743,7 @@ function update(dt) {
                     val: randSym, 
                     x: Math.random() * (GAME_WIDTH - 60) + 30, 
                     y: -40, 
-                    speed: 120 + Math.random() * 60 
+                    speed: 150 + Math.random() * 90 
                 }); 
             }
             lastSpawnSym = 0; 
@@ -2082,7 +2165,85 @@ function update(dt) {
 
 function draw() {
     ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+    
+    // 🛸 [1층: 타이틀 메인 배경 사출]: 별빛 도트들보다 먼저 바닥에 깔아두어 은하수가 지구 뒤편으로 흐르게 하네!
+    if (gameState === 'START') {
+        if (titleBgImg.complete && titleBgImg.naturalWidth !== 0) {
+            ctx.drawImage(titleBgImg, 0, 0, GAME_WIDTH, GAME_HEIGHT);
+        }
+    }
+    
 	drawStars();
+    
+    // 🛸 [로건의 타이틀 전용 다층 타원형 부유 엔진 (Parallax Ellipse Floating)]
+    if (gameState === 'START') {
+        // 게임 상태와 무관하게 브라우저 기동 후 흐르는 정밀 시간축(초 단위) 포착
+        let t = performance.now() * 0.001; 
+        
+    // 💡 [관제탑 구도 조준]: 로고 아래와 지구 위쪽 사이 공백에 안착시키기 위한 기본 Y 좌표 세팅!
+        // 화면을 보면서 숫자들이 위나 아래로 쏠린다면 이 280 숫자를 기호에 맞게 가볍게 올리거나 내리게나.
+        let baseY = 280; 
+
+		if (numsFarImg.complete && numsFarImg.naturalWidth !== 0) {
+            let h = GAME_WIDTH * (numsFarImg.naturalHeight / numsFarImg.naturalWidth);
+            let dx = Math.cos(t * 0.4) * 1.5;
+            let dy = Math.sin(t * 0.4) * 3.5 + baseY;
+            ctx.drawImage(numsFarImg, dx, dy, GAME_WIDTH, h);
+        }
+        
+        // 💡 층 2: Middle 레이어 (속도 1.5배 느리게: 1.0 -> 0.67 / 타원 크기 절반: 7,14 -> 3.5,7)
+        if (numsMiddleImg.complete && numsMiddleImg.naturalWidth !== 0) {
+            let h = GAME_WIDTH * (numsMiddleImg.naturalHeight / numsMiddleImg.naturalWidth);
+            let dx = Math.cos(t * 0.67 + 1.8) * 3.5;
+            let dy = Math.sin(t * 0.67 + 1.8) * 7 + baseY;
+            ctx.drawImage(numsMiddleImg, dx, dy, GAME_WIDTH, h);
+        }
+        
+        // 💡 층 1: Close 레이어 (속도 1.5배 느리게: 1.4 -> 0.93 / 타원 크기 절반: 12,24 -> 6,12)
+        if (numsCloseImg.complete && numsCloseImg.naturalWidth !== 0) {
+            let h = GAME_WIDTH * (numsCloseImg.naturalHeight / numsCloseImg.naturalWidth);
+            let dx = Math.cos(t * 0.93 + 3.2) * 6;
+            let dy = Math.sin(t * 0.93 + 3.2) * 12 + baseY;
+            ctx.drawImage(numsCloseImg, dx, dy, GAME_WIDTH, h);
+        }
+		
+		// ==========================================================
+        // 🛸 [지휘관의 직관적 픽셀 프린트 엔진 - 추가]
+        // ==========================================================
+        ctx.save();
+        ctx.fillStyle = '#eeeeee';                 // 글자 색상 (순백색)
+        ctx.font = '42px "Neo Dunggeunmo"';        // 글자 크기와 픽셀 폰트 락온
+        ctx.textAlign = 'center';                  // 가로 정중앙 정렬
+        
+        // 💡 [원하는 고도 조준]: 720px 지점에 글자를 출력하네! 
+        // 화면을 보면서 더 내리고 싶다면 750, 올리고 싶다면 700 등으로 이 숫자 하나만 고치면 끝이네!
+        let printY = 740; 
+
+        // 레트로 오락실 특유의 0.5초 주기 깜빡임(Blink) 회로 가동
+        if (Math.floor(performance.now() / 500) % 2 === 0) {
+            ctx.fillText("TAP TO PLAY", GAME_WIDTH / 2, printY);
+        }
+        ctx.restore();
+		
+	// ==========================================================
+	// 🛸 [로건의 데이터 연동 조건부 메뉴 렌더러 - 개조]
+	// ==========================================================
+	// 💡 오직 로컬 스토리지 금고에 세이브파일 흔적이 실존할 때만 2층 서브 메뉴를 노출하네!
+        if (localStorage.getItem('mste_sys_save') !== null) {
+            ctx.save();
+            
+            let breathe = (Math.sin(performance.now() * 0.002) + 1) / 2; 
+            let subAlpha = 0.5 + breathe * 0.5; 
+            
+            ctx.fillStyle = `rgba(187, 187, 187, ${subAlpha})`;                 
+            ctx.font = '22px "Neo Dunggeunmo"';        
+            ctx.textAlign = 'center';                  
+            
+            let subPrintY = 810; 
+            ctx.fillText("START NEW GAME", GAME_WIDTH / 2, subPrintY);
+            ctx.restore();
+        }
+	}
 	
 	// ==========================================
     // ⚡ [3단계] HOLD ON, I'M COMING 애니메이션 레이저 렌더링
@@ -2134,6 +2295,13 @@ function draw() {
     });
 	
     ctx.strokeStyle = '#333'; ctx.lineWidth = 2; ctx.strokeRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+	
+	// 🛸 [로건의 타이틀 캔버스 가드]: 은은한 배경 별무리 위에 투명 PNG 타이틀을 안착시키네!
+    if (gameState === 'START') {
+        if (titleImage.complete) {
+            ctx.drawImage(titleImage, 0, 0, GAME_WIDTH, GAME_HEIGHT);
+        }
+    }
 	
     if (gameState === 'LEADERBOARD' || gameState === 'UPLOADING') {
 		document.querySelectorAll('.ingame-ad').forEach(el => el.remove());
@@ -2301,29 +2469,38 @@ function draw() {
             ctx.restore();
         });
 		
-        enemies.forEach(en => { 
-            // 1. 기존의 바깥쪽 테두리를 그리네
-            ctx.strokeStyle = en.color; 
-            ctx.lineWidth = en.isBoss ? 4 : 2; 
+		enemies.forEach(en => { 
             ctx.beginPath();
-            // 맨 마지막 숫자 12가 모서리를 얼마나 둥글게 깎을지 결정하는 '반지름(Radius)'일세!
+            // 모서리가 둥근 사각형 기틀 형성
             ctx.roundRect(en.x, en.y, en.width, en.height, 12);
-            ctx.stroke();
+            
+            // 🛸 [로건의 피아식별 분기 회로]: 아이템 보급선(dropItem 보유)인가 일반 적군인가?
+            if (en.dropItem) {
+                ctx.fillStyle = '#ffffff'; // 지휘관의 요청대로 아이템쉽은 순백색 확정!
+            } else {
+                ctx.fillStyle = '#bbbbbb'; // 일반 적들은 눈이 편안한 연회색!
+            }
+            ctx.fill();            
 
-            // C타입 적(장갑병)의 안쪽 1픽셀 장갑 연출도 똑같이 부드럽게 깎아주네!
+            // C타입 적(장갑병)의 안쪽 1픽셀 장갑 연출
             if (en.isCriticalOnly) {
                 ctx.beginPath();
-                // 패딩 값을 주어 안쪽으로 4픽셀 들여보내고, 둥글기도 8로 살짝 줄여서 핏을 맞췄네.
-                ctx.roundRect(en.x + 4, en.y + 4, en.width - 8, en.height - 8, 8);
+                ctx.roundRect(en.x - 4, en.y - 4, en.width + 8, en.height + 8, 16);
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 2;
                 ctx.stroke();
             }
 
-            // 2. 적의 HP 숫자 출력 (기존 코드 유지)
-            ctx.fillStyle = '#fff'; 
+			// 2. 적의 HP 숫자 또는 아이템쉽 마커 출력
+            ctx.fillStyle = '#000000'; 
             ctx.font = '30px "Neo Dunggeunmo"'; 
             ctx.textAlign = 'center'; 
-            ctx.textBaseline='middle'; 
-            ctx.fillText(en.hp > 0 ? en.hp : "", en.x + en.width/2, en.y + en.height/2 + 2); 
+            ctx.textBaseline = 'middle'; 
+            
+            // 🛸 [로건의 보급 시각 스포터]: 아이템쉽은 HP(1) 대신 지휘관의 요청대로 레트로한 '?'를 각인하네!
+            let textToDraw = en.dropItem ? "?" : (en.hp > 0 ? en.hp : "");
+            
+            ctx.fillText(textToDraw, en.x + en.width/2, en.y + en.height/2 + 2); 
         });
 		
         bullets.forEach(b => { 
