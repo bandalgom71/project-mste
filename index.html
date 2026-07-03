@@ -648,6 +648,7 @@ const titleBgImg = new Image();    titleImage.src = 'assets/titlebg.png';
 const numsFarImg = new Image();    numsFarImg.src = 'assets/numbers_far.png';
 const numsMiddleImg = new Image(); numsMiddleImg.src = 'assets/numbers_middle.png';
 const numsCloseImg = new Image();  numsCloseImg.src = 'assets/numbers_close.png';
+const titleShipImg = new Image();  titleShipImg.src = 'assets/titleship.png';
 
 mainTitle.innerText = "";
 
@@ -965,11 +966,11 @@ window.addEventListener('mousedown', (e) => {
         const pos = getGameCoordinates(e.clientX, e.clientY); 
         
         // 📐 1층 상자: TAP TO PLAY 구역 (Y고도 700 ~ 780)
-        if (pos.x >= 120 && pos.x <= 480 && pos.y >= 700 && pos.y <= 780) {
+        if (pos.x >= 120 && pos.x <= 480 && pos.y >= 730 && pos.y <= 810) {
             startGame(false); 
         }
         // 📐 2층 상자: START NEW GAME 구역 (Y고도 790 ~ 840)
-        else if (pos.x >= 120 && pos.x <= 480 && pos.y >= 790 && pos.y <= 840) {
+        else if (pos.x >= 120 && pos.x <= 480 && pos.y >= 915 && pos.y <= 955) {
             if (localStorage.getItem('mste_sys_save') !== null) {
                 startGame(true);
             }
@@ -2166,13 +2167,6 @@ function update(dt) {
 function draw() {
     ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
     
-    // 🛸 [1층: 타이틀 메인 배경 사출]: 별빛 도트들보다 먼저 바닥에 깔아두어 은하수가 지구 뒤편으로 흐르게 하네!
-    if (gameState === 'START') {
-        if (titleBgImg.complete && titleBgImg.naturalWidth !== 0) {
-            ctx.drawImage(titleBgImg, 0, 0, GAME_WIDTH, GAME_HEIGHT);
-        }
-    }
-    
 	drawStars();
     
     // 🛸 [로건의 타이틀 전용 다층 타원형 부유 엔진 (Parallax Ellipse Floating)]
@@ -2207,42 +2201,38 @@ function draw() {
             ctx.drawImage(numsCloseImg, dx, dy, GAME_WIDTH, h);
         }
 		
-		// ==========================================================
-        // 🛸 [지휘관의 직관적 픽셀 프린트 엔진 - 추가]
-        // ==========================================================
-        ctx.save();
-        ctx.fillStyle = '#eeeeee';                 // 글자 색상 (순백색)
-        ctx.font = '42px "Neo Dunggeunmo"';        // 글자 크기와 픽셀 폰트 락온
-        ctx.textAlign = 'center';                  // 가로 정중앙 정렬
-        
-        // 💡 [원하는 고도 조준]: 720px 지점에 글자를 출력하네! 
-        // 화면을 보면서 더 내리고 싶다면 750, 올리고 싶다면 700 등으로 이 숫자 하나만 고치면 끝이네!
-        let printY = 740; 
-
-        // 레트로 오락실 특유의 0.5초 주기 깜빡임(Blink) 회로 가동
-        if (Math.floor(performance.now() / 500) % 2 === 0) {
-            ctx.fillText("TAP TO PLAY", GAME_WIDTH / 2, printY);
-        }
-        ctx.restore();
-		
-	// ==========================================================
-	// 🛸 [로건의 데이터 연동 조건부 메뉴 렌더러 - 개조]
-	// ==========================================================
-	// 💡 오직 로컬 스토리지 금고에 세이브파일 흔적이 실존할 때만 2층 서브 메뉴를 노출하네!
-        if (localStorage.getItem('mste_sys_save') !== null) {
+		// 3. [신규 사출] 글자 위치 간섭 없이 하단 빈 공간(890px)에 우주선 투사!
+        if (titleShipImg.complete && titleShipImg.naturalWidth !== 0) {
             ctx.save();
+            let shipW = 300; // 웅장한 체급을 위해 가로폭 280픽셀 락온
+            let shipH = shipW * (titleShipImg.naturalHeight / titleShipImg.naturalWidth); 
+
+            // 📐 [진자 역학 레이더망 구축]
+            let pivotX = GAME_WIDTH / 2; // 가로 정중앙 (300px)
+            let pivotY = 600;            // 💡 중심축
+            let L = 750 - pivotY;        // 원래 우주선 고도와 중심축 사이의 진자 줄 길이
+
+            // ⏱️ [물리 파라미터 락온]
+            let period = 6;                 // 💡 왕복 주루 시간
+            let angleMax = 7 * Math.PI / 180; // 💡 진폭
+
+            // 🌊 [역학 이징(Easing) 연산]: 사인 함수가 양 끝에서 부드럽게 감속하는 이징을 자동 처리하네!
+            let currentAngle = angleMax * Math.sin(t * (2 * Math.PI / period));
+
+            // 🎯 삼각함수로 각도에 따른 우주선의 실시간 X, Y 궤도 좌표 역산
+            let shipX = pivotX + L * Math.sin(currentAngle);
+            let shipY = pivotY + L * Math.cos(currentAngle);
+
+            // 🚀 [시공간 매트릭스 변환]: 계산된 좌표로 이동 후 기체 기울이기!
+            ctx.translate(shipX, shipY);
             
-            let breathe = (Math.sin(performance.now() * 0.002) + 1) / 2; 
-            let subAlpha = 0.5 + breathe * 0.5; 
-            
-            ctx.fillStyle = `rgba(187, 187, 187, ${subAlpha})`;                 
-            ctx.font = '22px "Neo Dunggeunmo"';        
-            ctx.textAlign = 'center';                  
-            
-            let subPrintY = 810; 
-            ctx.fillText("START NEW GAME", GAME_WIDTH / 2, subPrintY);
+            // 💡 지휘관의 요청: 진자 움직임과 완전히 동기화되어 좌우로 기체가 영롱하게 롤링하네!
+            ctx.rotate(-currentAngle * 0.7); 
+
+            // 중심점을 기준으로 정밀 사출!
+            ctx.drawImage(titleShipImg, -shipW / 2, -shipH / 2, shipW, shipH);
             ctx.restore();
-        }
+        }		
 	}
 	
 	// ==========================================
@@ -2300,6 +2290,51 @@ function draw() {
     if (gameState === 'START') {
         if (titleImage.complete) {
             ctx.drawImage(titleImage, 0, 0, GAME_WIDTH, GAME_HEIGHT);
+        }
+		
+	// ==========================================================
+	// 🛸 [지휘관의 직관적 픽셀 프린트 엔진 - 블랙 아웃라인 가드 빌드]
+	// ==========================================================
+        ctx.save();
+        ctx.fillStyle = '#eeeeee';                 // 글자 색상 (순백색)
+        ctx.font = '48px "Neo Dunggeunmo"';        // 💡 지휘관의 요청: 웅장한 48px 체급 락온!
+        ctx.textAlign = 'center';                  // 가로 정중앙 정렬
+        
+        let printY = 770;                          // 💡 지휘관의 요청: 770 명당 고도 보존!
+
+        // 레트로 오락실 특유의 0.5초 주기 깜빡임(Blink) 회로 가동
+        if (Math.floor(performance.now() / 500) % 2 === 0) {
+            // 💡 [블랙 외곽선 장착]: 흰 글씨를 쓰기 전에 뒤편에 6픽셀짜리 흑색 테두리를 먼저 감싸네!
+            ctx.strokeStyle = '#000000';
+            ctx.lineWidth = 6;
+            ctx.strokeText("TAP TO PLAY", GAME_WIDTH / 2, printY);
+            
+            ctx.fillText("TAP TO PLAY", GAME_WIDTH / 2, printY);
+        }
+        ctx.restore();
+		
+	// ==========================================================
+	// 🛸 [로건의 데이터 연동 조건부 메뉴 렌더러 - 화이트 아웃라인 가드 빌드]
+	// ==========================================================
+        if (localStorage.getItem('mste_sys_save') !== null) {
+            ctx.save();
+            
+            let breathe = (Math.sin(performance.now() * 0.002) + 1) / 2; 
+            let subAlpha = 0.5 + breathe * 0.5; 
+            
+            ctx.font = '24px "Neo Dunggeunmo"';        
+            ctx.textAlign = 'center';                  
+            
+            let subPrintY = 935;                   // 💡 지휘관의 요청: 935 하단 고도 보존!
+            
+            // 💡 [화이트 외곽선 장착]: 연회색 글씨 주위에 서브 메뉴 특유의 호흡 투명도(subAlpha)와 동기화된 백색 테두리를 둘러치네!
+            ctx.strokeStyle = '#000000';
+            ctx.lineWidth = 1;
+            ctx.strokeText("START NEW GAME", GAME_WIDTH / 2, subPrintY);
+
+            ctx.fillStyle = `rgba(221, 221, 221, ${subAlpha})`;                 
+            ctx.fillText("START NEW GAME", GAME_WIDTH / 2, subPrintY);
+            ctx.restore();
         }
     }
 	
