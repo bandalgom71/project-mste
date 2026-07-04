@@ -80,6 +80,7 @@
 <div id="ui-layer">
     <div id="message-box">
 		<h1 id="main-title"></h1>        
+		<p id="sub-text"></p> </div>
 	</div>
 
     <div id="highscore-input" class="hidden">
@@ -127,6 +128,7 @@ let lastExceptionClickTime = 0;
 let justResumed = false;
 let lastTime = 0, elapsedTime = 0;
 let stageClearTimer = 0;
+let titleWarpTimer = 0;
 let crashTimer = 0; 
 let warpTimer = 0;
 let pickupTimer = 0; 
@@ -511,15 +513,20 @@ function updateStars(dt) {
         s.liveAlpha = s.minAlpha + (s.alpha - s.minAlpha) * wave; // 최소 밝기 ~ 원래 밝기 사이 진동
 
         // 2. 타이틀 화면전용 방사형 주행 물리 엔진
-        if (gameState === 'START') {
+        if (gameState === 'START' || gameState === 'TITLEWARP') {
             if (s.angle === undefined || s.dist === undefined) {
                 s.angle = Math.atan2(s.y - centerY, s.x - centerX);
                 s.dist = Math.hypot(s.x - centerX, s.y - centerY);
             }
 
             let radialSpeed = (s.speed || 40) * 0.8;
-            s.dist += radialSpeed * dt;
-
+			
+			if (gameState === 'TITLEWARP') {
+                radialSpeed += Math.pow(titleWarpTimer, 2) * 1200;
+            }			
+			
+			s.dist += radialSpeed * dt;
+			           
             s.x = centerX + Math.cos(s.angle) * s.dist;
             s.y = centerY + Math.sin(s.angle) * s.dist;
 
@@ -560,7 +567,37 @@ function drawStars() {
             ctx.moveTo(s.x, s.y);
             ctx.lineTo(s.x, s.y - (s.speed * 0.08));
             ctx.stroke();
-        } else if (gameState === 'START') {
+		}
+			
+		else if (gameState === 'TITLEWARP') {
+            let currentDist = s.dist || 0;
+            let finalSize = Math.min(2.5, s.size * (1.0 + currentDist / 400));
+            let alphaScale = Math.min(0.95, (0.2 + currentDist / 300));
+            
+            if (titleWarpTimer < 1.0) {
+                // ✨ 0초 ~ 1초 구간: 선을 긋지 않고, 폭발적으로 가속되는 예쁜 점(Dot) 모드로 시각적 텐션 충전!
+                // 타이틀 화면(START)의 순정 고대비 거듭제곱 연출 유전자를 완벽하게 계승하네.
+                let alphaScaleStart = Math.pow(currentAlpha, 2.5) * 2.8 * (0.15 + currentDist / 400);
+                alphaScaleStart = Math.max(0.04, Math.min(0.95, alphaScaleStart));
+
+                ctx.fillStyle = `rgba(255, 255, 255, ${alphaScaleStart})`;
+                ctx.arc(s.x, s.y, finalSize, 0, Math.PI * 2);
+                ctx.fill();
+            } else {
+                // 💫 1초 이후 (2초째 진입) 구간: 이미 바깥으로 날아가고 있는 별들의 꽁무니 뒤로 광속선(Streak)이 역동적 팽창!
+                let warpProgress = titleWarpTimer - 1.0; // 1.0초일 때 0부터 시작하도록 이징 원점 조절
+                let streakLength = warpProgress * 35 * (1 + currentDist / 150);
+                
+                ctx.strokeStyle = `rgba(255, 255, 255, ${alphaScale})`;
+                ctx.lineWidth = finalSize;
+                ctx.moveTo(s.x, s.y);
+                // 소실점 중심축 반대 방향 벡터로 칼각 꼬리 레이저 테일 투사!
+                ctx.lineTo(s.x - Math.cos(s.angle) * streakLength, s.y - Math.sin(s.angle) * streakLength);
+                ctx.stroke();
+            }			
+		}
+					
+        else if (gameState === 'START') {
             let currentDist = s.dist || 0;
             let finalSize = Math.min(2.3, s.size * (1.0 + currentDist / 500));
 
@@ -873,11 +910,15 @@ function startGame(forceNew = false) {
         console.log(`🛠️ [관제탑] 새로운 작전 가동. 1스테이지부터 완전히 새로 출발하네!`);
     }
     
-    resetStage(); 
+    gameState = 'TITLEWARP';
+    titleWarpTimer = 0;
+    messageBox.classList.add('hidden');
 }
 
 function resetStage() {
-    gameState = 'PLAY'; messageBox.classList.add('hidden'); highscoreInput.classList.add('hidden');
+    gameState = 'PLAY'; 
+	titleWarpTimer = 0;
+	messageBox.classList.add('hidden'); highscoreInput.classList.add('hidden');
     document.body.style.cursor = 'default';
     player.x = GAME_WIDTH / 2; player.y = GAME_HEIGHT - 150;
 	
@@ -1442,6 +1483,18 @@ function spawnExplosion(x, y, tier, textValue, damageVal, multiplier) {
 
 function update(dt) {
 	if (gameState === 'PAUSE') return;
+	
+	// 🛸 [로건의 TITLEWARP 인트로 타임라인 관리자]
+    if (gameState === 'TITLEWARP') {
+        titleWarpTimer += dt / TIME_SCALE;
+        updateStars(dt); // 워프가 기동되는 동안에도 배경의 별들은 주행 연산을 이어가네!
+        
+        if (titleWarpTimer >= 3.6) {
+            resetStage(); // 💡 3.6초가 만료되는 마디에 진짜 인게임 전장으로 전격 사출!
+        }
+        return; // 워프 중에는 아래쪽 인게임 연산(적 하강, 충돌 등)을 철저히 락온 차단하네!
+    }
+		
 	// 🛸 [규칙 엄수]: 1초에 정확히 1회전(2 * Math.PI) 하도록 실시간 축적하네!
 	baseOrbitAngle += (Math.PI * dt) / TIME_SCALE; 
     if (baseOrbitAngle > Math.PI * 2) {
@@ -2169,72 +2222,182 @@ function draw() {
     
 	drawStars();
     
-    // 🛸 [로건의 타이틀 전용 다층 타원형 부유 엔진 (Parallax Ellipse Floating)]
-    if (gameState === 'START') {
-        // 게임 상태와 무관하게 브라우저 기동 후 흐르는 정밀 시간축(초 단위) 포착
-        let t = performance.now() * 0.001; 
-        
-    // 💡 [관제탑 구도 조준]: 로고 아래와 지구 위쪽 사이 공백에 안착시키기 위한 기본 Y 좌표 세팅!
-        // 화면을 보면서 숫자들이 위나 아래로 쏠린다면 이 280 숫자를 기호에 맞게 가볍게 올리거나 내리게나.
-        let baseY = 280; 
+	// 🛸 [로건의 타이틀 전용 다층 타원형 부유 엔진 (Parallax Ellipse Floating)]
+        if (gameState === 'START' || gameState === 'TITLEWARP') { // 🛠️ 가드 전면 개방!
+            let t = performance.now() * 0.001; 
+            let baseY = 280; 
 
-		if (numsFarImg.complete && numsFarImg.naturalWidth !== 0) {
-            let h = GAME_WIDTH * (numsFarImg.naturalHeight / numsFarImg.naturalWidth);
-            let dx = Math.cos(t * 0.4) * 1.5;
-            let dy = Math.sin(t * 0.4) * 3.5 + baseY;
-            ctx.drawImage(numsFarImg, dx, dy, GAME_WIDTH, h);
-        }
-        
-        // 💡 층 2: Middle 레이어 (속도 1.5배 느리게: 1.0 -> 0.67 / 타원 크기 절반: 7,14 -> 3.5,7)
-        if (numsMiddleImg.complete && numsMiddleImg.naturalWidth !== 0) {
-            let h = GAME_WIDTH * (numsMiddleImg.naturalHeight / numsMiddleImg.naturalWidth);
-            let dx = Math.cos(t * 0.67 + 1.8) * 3.5;
-            let dy = Math.sin(t * 0.67 + 1.8) * 7 + baseY;
-            ctx.drawImage(numsMiddleImg, dx, dy, GAME_WIDTH, h);
-        }
-        
-        // 💡 층 1: Close 레이어 (속도 1.5배 느리게: 1.4 -> 0.93 / 타원 크기 절반: 12,24 -> 6,12)
-        if (numsCloseImg.complete && numsCloseImg.naturalWidth !== 0) {
-            let h = GAME_WIDTH * (numsCloseImg.naturalHeight / numsCloseImg.naturalWidth);
-            let dx = Math.cos(t * 0.93 + 3.2) * 6;
-            let dy = Math.sin(t * 0.93 + 3.2) * 12 + baseY;
-            ctx.drawImage(numsCloseImg, dx, dy, GAME_WIDTH, h);
+            // 🔢 [마스터 전역 변환 매트릭스 - 1단계 세이브]
+            ctx.save();
+            if (gameState === 'TITLEWARP') {
+                let zoomScale = 1.0;
+                let alpha = 1.0;
+                
+                if (titleWarpTimer < 1.2) {
+                    // ⏱️ 구간 1 (0초~1.2초): 0.4 배율로 완만하고 느리게 가속 확대
+                    zoomScale = 1.0 + Math.pow(titleWarpTimer, 2) * 0.4; 
+                    alpha = 1.0;
+                } else if (titleWarpTimer <= 2.0) {
+                    // ⏱️ 구간 2 (1.2초~2.0초): 초고속 가속 돌입
+                    let dt = titleWarpTimer - 1.2; 
+                    zoomScale = 1.576 + (dt * 30.0);        
+                    alpha = 1.0; // 🛠️ 지휘관의 명령: 1.2초 이후 흐려짐 없이 선명도 100% 사수!
+                } else {
+                    alpha = 0.0; // 2초 정각 완전 소멸
+                }
+                
+                // 소실점 중심축(300, 650) 마스터 매트릭스 변환 가동
+                ctx.translate(GAME_WIDTH / 2, 650);
+                ctx.scale(zoomScale, zoomScale);
+                ctx.translate(-GAME_WIDTH / 2, -650);
+                ctx.globalAlpha = alpha; 
+            }
+
+            // 💡 층 3: Far 레이어 (지휘관의 명령: 0.8배로 아스라이 축수하여 원경 락온!)
+            if (numsFarImg.complete && numsFarImg.naturalWidth !== 0) {
+                ctx.save(); // 🛡️ Far 레이어 개별 보호막 가동
+                
+                let farScale = 0.8; // 👈 Far 전용 독자 배율 다이얼!
+                ctx.translate(GAME_WIDTH / 2, 650);   
+                ctx.scale(farScale, farScale);         
+                ctx.translate(-GAME_WIDTH / 2, -650);  
+                
+                let h = GAME_WIDTH * (numsFarImg.naturalHeight / numsFarImg.naturalWidth);
+                let dx = Math.cos(t * 0.4) * 1.5;
+                let dy = Math.sin(t * 0.4) * 3.5 + baseY;
+                ctx.drawImage(numsFarImg, dx, dy, GAME_WIDTH, h);
+                
+                ctx.restore(); // 🛡️ Far 효과 즉시 소멸 (전염 차단)
+            }
+            
+            // 💡 층 2: Middle 레이어 (지휘관의 명령: 1.0배 순정 크기 유지!)
+            if (numsMiddleImg.complete && numsMiddleImg.naturalWidth !== 0) {
+                ctx.save(); // 🛡️ Middle 레이어 개별 보호막 가동
+                
+                let midScale = 1.0; // 👈 Middle 전용 독자 배율 다이얼!
+                ctx.translate(GAME_WIDTH / 2, 650);   
+                ctx.scale(midScale, midScale);         
+                ctx.translate(-GAME_WIDTH / 2, -650);  
+                
+                let h = GAME_WIDTH * (numsMiddleImg.naturalHeight / numsMiddleImg.naturalWidth);
+                let dx = Math.cos(t * 0.67 + 1.8) * 3.5;
+                let dy = Math.sin(t * 0.67 + 1.8) * 7 + baseY;
+                ctx.drawImage(numsMiddleImg, dx, dy, GAME_WIDTH, h);
+                
+                ctx.restore(); // 🛡️ Middle 효과 즉시 소멸
+            }
+            
+            // 💡 층 1: Close 레이어 (지휘관의 명령: 1.2배로 웅장하게 키워 전방 락온!)
+            if (numsCloseImg.complete && numsCloseImg.naturalWidth !== 0) {
+                ctx.save(); // 🛡️ Close 레이어 개별 보호막 가동
+                
+                let closeScale = 1.2; // 👈 Close 전용 독자 배율 다이얼!
+                ctx.translate(GAME_WIDTH / 2, 650);   
+                ctx.scale(closeScale, closeScale);         
+                ctx.translate(-GAME_WIDTH / 2, -650);  
+                
+                let h = GAME_WIDTH * (numsCloseImg.naturalHeight / numsCloseImg.naturalWidth);
+                let dx = Math.cos(t * 0.93 + 3.2) * 6;
+                let dy = Math.sin(t * 0.93 + 3.2) * 12 + baseY;
+                ctx.drawImage(numsCloseImg, dx, dy, GAME_WIDTH, h);
+                
+                ctx.restore(); // 🛡️ Close 효과 즉시 소멸
+            }
+            
+            ctx.restore(); // 🛡️ [마스터 변환 매트릭스 리셋]: 아래 우주선은 완벽하게 순정 상태로 사수하네!
+
+	// 3. 🛸 [진자 우주선 투사 구역] - 원래 고도/원래 광도로 고고하게 좌우 롤링 사수!
+            if (titleShipImg.complete && titleShipImg.naturalWidth !== 0) {
+                ctx.save();
+                let shipW = 300; 
+                let shipH = shipW * (titleShipImg.naturalHeight / titleShipImg.naturalWidth); 
+
+                let pivotX = GAME_WIDTH / 2; 
+                let pivotY = 600;            
+                let L = 750 - pivotY;        
+
+                let period = 6;                 
+                let angleMax = 7 * Math.PI / 180; 
+
+                let currentAngle = angleMax * Math.sin(t * (2 * Math.PI / period));
+                let shipX = pivotX + L * Math.sin(currentAngle);
+                let shipY = pivotY + L * Math.cos(currentAngle);
+
+                ctx.translate(shipX, shipY);
+                ctx.rotate(-currentAngle * 0.7); 
+
+                // =================================================================
+                // 📊 [지휘관 전용: 듀얼 애프터버너 핀포인트 튜닝 좌표 제어판]
+                // =================================================================
+                let flameXOffset = 46;           // 🎯 [X좌표 다이얼]: 엔진 노즐의 좌우 간격
+                let flameYOffset = shipH * 0.4; // 🎯 [Y좌표 다이얼]: 엔진 노즐의 상하 높이 고도
+                let maxRadius = 60;              // 🎯 [구형 반지름]: 1.2초 전 부풀어 오르는 에너지 원형 크기
+                let baseBeamW = 500;              // 🎯 [광선 뿜어짐 폭]: 뒤로 길게 찢어지는 빔의 자체 두께
+                let beamAngleSpread = 3.3;       // 🎯 [빔 각도 다이얼]: 0이면 11자 일직선, 숫자가 클수록 V자로 바깥으로 벌어지네!
+                // =================================================================
+
+                if (gameState === 'TITLEWARP') {
+                    ctx.save();
+                    
+                    [-flameXOffset, flameXOffset].forEach(offsetX => {
+                        
+                        if (titleWarpTimer < 1.2) {
+                            // 🔴 [페이즈 1]: 0 ~ 1.2초 구간 - 에너지 압축 빌드업 (순정 유지)
+                            let progress = titleWarpTimer / 1.2;
+                            let currentRadius = progress * maxRadius;
+                            
+                            let radialGrad = ctx.createRadialGradient(offsetX, flameYOffset, 0, offsetX, flameYOffset, currentRadius);
+                            radialGrad.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
+                            radialGrad.addColorStop(0.3, 'rgba(255, 255, 255, 0.85)');
+                            radialGrad.addColorStop(1, 'rgba(255, 255, 255, 0.0)');
+                            
+                            ctx.fillStyle = radialGrad;
+                            ctx.beginPath();
+                            ctx.arc(offsetX, flameYOffset, currentRadius, 0, Math.PI * 2);
+                            ctx.fill();
+                            
+                        } else if (titleWarpTimer <= 4.0) {
+                            // ⚡ [페이즈 2]: 1.2초 이후 - 후방 V자 차원 도약 추진 가동!
+                            let dt = titleWarpTimer - 1.2;
+                            ctx.globalAlpha = 0.9; 
+                            
+                            // 📐 [수학적 인과관계]: offsetX가 좌측(-35), 우측(+35) 사인을 품고 있으므로, 
+                            // 여기에 각도 상수를 곱해주면 별도의 조건문 없이도 알아서 데칼코마니처럼 바깥으로 V자로 찢어지네!
+                            let spreadShift = offsetX * beamAngleSpread;
+                            
+                            let flicker = Math.sin(performance.now() * 0.1 + offsetX) * 15;
+                            let beamLength = Math.min(700, 400 + dt * 1800) + flicker; 
+                            let beamWidth = baseBeamW + Math.cos(performance.now() * 0.05 + offsetX) * 6;   
+                            
+                            // 💡 [그라데이션 축선 동기화]: 하단 빔이 꺾인 만큼, 빛의 축선(끝점 X)도 spreadShift 만큼 같이 꺾어주어야 그래픽이 안 깨지네!
+                            let linearGrad = ctx.createLinearGradient(offsetX, flameYOffset, offsetX + spreadShift, flameYOffset + beamLength);
+                            linearGrad.addColorStop(0, 'rgba(255, 255, 255, 1.0)');     
+                            linearGrad.addColorStop(0.15, 'rgba(255, 255, 255, 0.85)');  
+                            linearGrad.addColorStop(0.6, 'rgba(255, 255, 255, 0.35)');   
+                            linearGrad.addColorStop(1, 'rgba(255, 255, 255, 0.0)');     
+                            
+                            ctx.fillStyle = linearGrad;
+                            ctx.beginPath();
+                            ctx.moveTo(offsetX - 12, flameYOffset); 
+                            ctx.lineTo(offsetX + 12, flameYOffset); 
+                            
+                            // 💡 [하단 빔 좌표 개조]: 다리 좌표에 spreadShift를 가산하여 바깥쪽으로 강렬하게 벌려주네!
+                            ctx.lineTo(offsetX + spreadShift + beamWidth / 2, flameYOffset + beamLength);  
+                            ctx.lineTo(offsetX + spreadShift - beamWidth / 2, flameYOffset + beamLength); 
+                            ctx.closePath();
+                            ctx.fill();
+                        }
+                    });
+                    
+                    ctx.restore();
+                }
+
+                // 기체 이미지를 그 위에 덮어씌워 배선을 완벽하게 가려버리네!
+                ctx.drawImage(titleShipImg, -shipW / 2, -shipH / 2, shipW, shipH);
+                ctx.restore();
+            }		
         }
 		
-		// 3. [신규 사출] 글자 위치 간섭 없이 하단 빈 공간(890px)에 우주선 투사!
-        if (titleShipImg.complete && titleShipImg.naturalWidth !== 0) {
-            ctx.save();
-            let shipW = 300; // 웅장한 체급을 위해 가로폭 280픽셀 락온
-            let shipH = shipW * (titleShipImg.naturalHeight / titleShipImg.naturalWidth); 
-
-            // 📐 [진자 역학 레이더망 구축]
-            let pivotX = GAME_WIDTH / 2; // 가로 정중앙 (300px)
-            let pivotY = 600;            // 💡 중심축
-            let L = 750 - pivotY;        // 원래 우주선 고도와 중심축 사이의 진자 줄 길이
-
-            // ⏱️ [물리 파라미터 락온]
-            let period = 6;                 // 💡 왕복 주루 시간
-            let angleMax = 7 * Math.PI / 180; // 💡 진폭
-
-            // 🌊 [역학 이징(Easing) 연산]: 사인 함수가 양 끝에서 부드럽게 감속하는 이징을 자동 처리하네!
-            let currentAngle = angleMax * Math.sin(t * (2 * Math.PI / period));
-
-            // 🎯 삼각함수로 각도에 따른 우주선의 실시간 X, Y 궤도 좌표 역산
-            let shipX = pivotX + L * Math.sin(currentAngle);
-            let shipY = pivotY + L * Math.cos(currentAngle);
-
-            // 🚀 [시공간 매트릭스 변환]: 계산된 좌표로 이동 후 기체 기울이기!
-            ctx.translate(shipX, shipY);
-            
-            // 💡 지휘관의 요청: 진자 움직임과 완전히 동기화되어 좌우로 기체가 영롱하게 롤링하네!
-            ctx.rotate(-currentAngle * 0.7); 
-
-            // 중심점을 기준으로 정밀 사출!
-            ctx.drawImage(titleShipImg, -shipW / 2, -shipH / 2, shipW, shipH);
-            ctx.restore();
-        }		
-	}
-	
 	// ==========================================
     // ⚡ [3단계] HOLD ON, I'M COMING 애니메이션 레이저 렌더링
     // ==========================================
@@ -2287,55 +2450,62 @@ function draw() {
     ctx.strokeStyle = '#333'; ctx.lineWidth = 2; ctx.strokeRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 	
 	// 🛸 [로건의 타이틀 캔버스 가드]: 은은한 배경 별무리 위에 투명 PNG 타이틀을 안착시키네!
-    if (gameState === 'START') {
+    if (gameState === 'START' || gameState === 'TITLEWARP') { // 🛠️ [수정]: 가드 전면 개방!
         if (titleImage.complete) {
-            ctx.drawImage(titleImage, 0, 0, GAME_WIDTH, GAME_HEIGHT);
-        }
-		
-	// ==========================================================
-	// 🛸 [지휘관의 직관적 픽셀 프린트 엔진 - 블랙 아웃라인 가드 빌드]
-	// ==========================================================
-        ctx.save();
-        ctx.fillStyle = '#eeeeee';                 // 글자 색상 (순백색)
-        ctx.font = '48px "Neo Dunggeunmo"';        // 💡 지휘관의 요청: 웅장한 48px 체급 락온!
-        ctx.textAlign = 'center';                  // 가로 정중앙 정렬
-        
-        let printY = 770;                          // 💡 지휘관의 요청: 770 명당 고도 보존!
-
-        // 레트로 오락실 특유의 0.5초 주기 깜빡임(Blink) 회로 가동
-        if (Math.floor(performance.now() / 500) % 2 === 0) {
-            // 💡 [블랙 외곽선 장착]: 흰 글씨를 쓰기 전에 뒤편에 6픽셀짜리 흑색 테두리를 먼저 감싸네!
-            ctx.strokeStyle = '#000000';
-            ctx.lineWidth = 6;
-            ctx.strokeText("TAP TO PLAY", GAME_WIDTH / 2, printY);
-            
-            ctx.fillText("TAP TO PLAY", GAME_WIDTH / 2, printY);
-        }
-        ctx.restore();
-		
-	// ==========================================================
-	// 🛸 [로건의 데이터 연동 조건부 메뉴 렌더러 - 화이트 아웃라인 가드 빌드]
-	// ==========================================================
-        if (localStorage.getItem('mste_sys_save') !== null) {
             ctx.save();
-            
-            let breathe = (Math.sin(performance.now() * 0.002) + 1) / 2; 
-            let subAlpha = 0.5 + breathe * 0.5; 
-            
-            ctx.font = '24px "Neo Dunggeunmo"';        
-            ctx.textAlign = 'center';                  
-            
-            let subPrintY = 935;                   // 💡 지휘관의 요청: 935 하단 고도 보존!
-            
-            // 💡 [화이트 외곽선 장착]: 연회색 글씨 주위에 서브 메뉴 특유의 호흡 투명도(subAlpha)와 동기화된 백색 테두리를 둘러치네!
-            ctx.strokeStyle = '#000000';
-            ctx.lineWidth = 1;
-            ctx.strokeText("START NEW GAME", GAME_WIDTH / 2, subPrintY);
-
-            ctx.fillStyle = `rgba(221, 221, 221, ${subAlpha})`;                 
-            ctx.fillText("START NEW GAME", GAME_WIDTH / 2, subPrintY);
+            // 💡 지구 장장과 게임 로고판도 소실점을 중심으로 거대하게 터지며 사출되네!
+            if (gameState === 'TITLEWARP') {
+                let bgZoom = 1.0 + Math.pow(titleWarpTimer, 2) * 2.2; // 지구 확대 속도 조절 다이얼
+                ctx.translate(GAME_WIDTH / 2, 650);
+                ctx.scale(bgZoom, bgZoom);
+                ctx.translate(-GAME_WIDTH / 2, -650);
+                ctx.globalAlpha = Math.max(0, 1.0 - titleWarpTimer / 3.0);
+            }
+            ctx.drawImage(titleImage, 0, 0, GAME_WIDTH, GAME_HEIGHT);
             ctx.restore();
         }
+		
+        // 🛡️ [텍스트 전용 격리 방화벽]: 버튼 클릭 순간 자네가 만든 글씨들은 투명 잔상 없이 샥 청정 소멸!
+        if (gameState === 'START') { 
+		
+            // ==========================================================
+            // 🛸 [지휘관의 직관적 픽셀 프린트 엔진 - 블랙 아웃라인 가드 빌드]
+            // ==========================================================
+            ctx.save();
+            ctx.fillStyle = '#eeeeee';                 
+            ctx.font = '48px "Neo Dunggeunmo"';        // 💡 지휘관의 48px 체급 보존!
+            ctx.textAlign = 'center';                  
+            let printY = 770;                          // 💡 지휘관의 770 명당 고도 보존!
+
+            if (Math.floor(performance.now() / 500) % 2 === 0) {
+                ctx.strokeStyle = '#000000';
+                ctx.lineWidth = 6;
+                ctx.strokeText("TAP TO PLAY", GAME_WIDTH / 2, printY);
+                ctx.fillText("TAP TO PLAY", GAME_WIDTH / 2, printY);
+            }
+            ctx.restore();
+            
+            // ==========================================================
+            // 🛸 [로건의 데이터 연동 조건부 메뉴 렌더러 - 화이트 아웃라인 가드 빌드]
+            // ==========================================================
+            if (localStorage.getItem('mste_sys_save') !== null) {
+                ctx.save();
+                let breathe = (Math.sin(performance.now() * 0.002) + 1) / 2; 
+                let subAlpha = 0.5 + breathe * 0.5; 
+                
+                ctx.font = '24px "Neo Dunggeunmo"';        // 💡 지휘관의 24px 체급 보존!
+                ctx.textAlign = 'center';                  
+                let subPrintY = 935;                       // 💡 지휘관의 935 명당 고도 보존!
+                
+                ctx.strokeStyle = '#000000';
+                ctx.lineWidth = 1;                         // 💡 지휘관의 1포인트 테두리 보존!
+                ctx.strokeText("START NEW GAME", GAME_WIDTH / 2, subPrintY);
+
+                ctx.fillStyle = `rgba(221, 221, 221, ${subAlpha})`; // 💡 지휘관의 221 광도 보존!                 
+                ctx.fillText("START NEW GAME", GAME_WIDTH / 2, subPrintY);
+                ctx.restore();
+            }
+        } // 🛡️ 텍스트 격리 방화벽 닫힘
     }
 	
     if (gameState === 'LEADERBOARD' || gameState === 'UPLOADING') {
