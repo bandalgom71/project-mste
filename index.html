@@ -696,9 +696,30 @@ async function sendGlobalScore(fullName, finalScore) {
     }
 }
 
-// 💡 10만 대군이 상주하는 광활한 서버이므로, 모든 유저가 명예롭게 자판을 칠 수 있도록 무조건 true 사출!
-function checkIsHighScore(finalScore) { 
-    return true; 
+// 📡 서버 검문소에 무선 패킷을 쏴서 내가 진짜 10만 등 안에 들었는지 판정하는 비동기 엔진
+async function checkIsHighScore(finalScore) { 
+    if (finalScore <= 0) return false; // 0점 오폭 등록은 원천 차단하네.
+    
+    const URL = `https://${PROJECT_ID}.supabase.co/rest/v1/rpc/check_if_high_score`;
+    
+    try {
+        const response = await fetch(URL, {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'apikey': SUPABASE_ANON_KEY,
+                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+            },
+            body: JSON.stringify({ player_score: finalScore }) 
+        });
+        
+        if (response.ok) {
+            return await response.json(); // 서버가 판정한 true(진입 성공) 또는 false(탈락)를 리턴하네.
+        }
+    } catch(e) {
+        console.error("❌ 검문소 통신 장애:", e);
+    }
+    return true; // 비상 상황(통신 에러) 시에는 가드로 일단 입력창 진입을 허용하네.
 }
 
 // 🔌 게임이 기동되는 순간, 닉네임이 없으므로 상위 21명의 데이터를 디폴트로 예열 로드하네.
@@ -1007,24 +1028,31 @@ function startWarpDrive() {
 
 function triggerStageFail() { gameState = 'FAIL'; messageBox.classList.remove('hidden'); mainTitle.innerText = "DEFENSE FAILED!"; subText.innerText = "RESTARTING STAGE..."; subText.style.color = '#888888'; SoundManager.stopBGM(); setTimeout(() => { resetStage(); }, 2000); }
 function handlePlayerCrash() { gameState = 'CRASHED'; crashTimer = 0; isDragging = false; document.body.style.cursor = 'default'; spawnExplosion(player.x, player.y - 20, 'critical', "SHIP IS DESTROYED", 0, 1); }
-// function gameOver() { document.body.style.cursor = 'default'; fetchGlobalScores(); if(checkIsHighScore(score)) { gameState = 'INPUT'; messageBox.classList.add('hidden'); highscoreInput.classList.remove('hidden'); initialsField.value = ""; initialsField.focus(); } else { showLeaderboard(); } }
-function gameOver() { 
+
+// 🎮 게임오버 시 전황을 통제하고 10만 위 커트라인을 판정하는 통제탑 (비동기 체질 업그레이드)
+async function gameOver() { 
     document.body.style.cursor = 'default'; 
     
     // 🎯 [자네의 기획 3]: 완전히 패배하여 전멸했으니 로컬 세이브 데이터를 흔적도 없이 삭제하네!
     SaveSystem.clear();
 
-    fetchGlobalScores(); 
-    if(checkIsHighScore(score)) { 
+    // 📡 [핵심 수술]: 서버 검문소의 결과(True/False)가 무전으로 도착할 때까지 이 자리에서 얌전히 기다리네!
+    const isHigh = await checkIsHighScore(score); 
+    
+    if (isHigh) { 
+        // 10만 위 진입 성공 시에만 명예롭게 이니셜 입력창 가동!
         gameState = 'INPUT'; 
         messageBox.classList.add('hidden'); 
         highscoreInput.classList.remove('hidden'); 
         initialsField.value = ""; 
         initialsField.focus(); 
     } else { 
+        // 10만 위 진입 실패 시에는 이름 입력창을 스킵하고 곧바로 글로벌 랭킹판으로 직행!
+        await fetchGlobalScores("");
         showLeaderboard(); 
     } 
 }
+
 function showLeaderboard() { gameState = 'LEADERBOARD'; messageBox.classList.add('hidden'); highscoreInput.classList.add('hidden'); }
 
 // =================================================================
