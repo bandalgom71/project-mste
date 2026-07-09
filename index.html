@@ -113,6 +113,7 @@ const subText = document.getElementById('sub-text');
 const highscoreInput = document.getElementById('highscore-input');
 const initialsField = document.getElementById('initials');
 const submitBtn = document.getElementById('submit-btn');
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9vY2hhdXpzeGVxY3Z4c3NjenRtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMxNTMzMzAsImV4cCI6MjA5ODcyOTMzMH0.UR8ONX326FNUtcFwNjcdfvu32QXGXTLnGSrCwPfU9SE"
 
 const GAME_WIDTH = 600;
 const GAME_HEIGHT = 1000;
@@ -641,7 +642,7 @@ async function fetchGlobalScores(targetName = "") {
                 'apikey': SUPABASE_ANON_KEY,
                 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
             },
-            body: JSON.stringify({ target_name: targetName })
+            body: JSON.stringify({ player_score: finalScore })
         });
         
         if (response.ok) {
