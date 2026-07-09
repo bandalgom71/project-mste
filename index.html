@@ -1029,14 +1029,14 @@ function startWarpDrive() {
 function triggerStageFail() { gameState = 'FAIL'; messageBox.classList.remove('hidden'); mainTitle.innerText = "DEFENSE FAILED!"; subText.innerText = "RESTARTING STAGE..."; subText.style.color = '#888888'; SoundManager.stopBGM(); setTimeout(() => { resetStage(); }, 2000); }
 function handlePlayerCrash() { gameState = 'CRASHED'; crashTimer = 0; isDragging = false; document.body.style.cursor = 'default'; spawnExplosion(player.x, player.y - 20, 'critical', "SHIP IS DESTROYED", 0, 1); }
 
-// 🎮 게임오버 시 전황을 통제하고 10만 위 커트라인을 판정하는 통제탑 (비동기 체질 업그레이드)
+// 🎮 게임오버 시 전황을 통제하고 10만 위 커트라인을 판정하는 통제탑
 async function gameOver() { 
     document.body.style.cursor = 'default'; 
     
     // 🎯 [자네의 기획 3]: 완전히 패배하여 전멸했으니 로컬 세이브 데이터를 흔적도 없이 삭제하네!
     SaveSystem.clear();
 
-    // 📡 [핵심 수술]: 서버 검문소의 결과(True/False)가 무전으로 도착할 때까지 이 자리에서 얌전히 기다리네!
+    // 📡 [핵심 수술]: 서버 검문소의 결과(true/false)가 무전으로 도착할 때까지 이 자리에서 얌전히 기다리네!
     const isHigh = await checkIsHighScore(score); 
     
     if (isHigh) { 
@@ -1047,7 +1047,7 @@ async function gameOver() {
         initialsField.value = ""; 
         initialsField.focus(); 
     } else { 
-        // 10만 위 진입 실패 시에는 이름 입력창을 스킵하고 곧바로 글로벌 랭킹판으로 직행!
+        // 10만 위 진입 실패 시에는 이름 입력창을 패스하고 곧바로 글로벌 랭킹판으로 직행!
         await fetchGlobalScores("");
         showLeaderboard(); 
     } 
@@ -1251,21 +1251,7 @@ window.addEventListener('keydown', function(e) {
 	
 	if ((e.key === 'z' || e.key === 'Z') && gameState === 'PLAY') {
         console.log("🛠️ [DEBUG] 관제탑 권한으로 즉시 하이스코어 검증 및 게임오버 진입!");
-        
-        // 🎯 [버그 해결]: 이제는 정확하게 SaveSystem의 clear 함수를 호출하여 `'mste_sys_save'`를 완벽하게 파쇄하네!
-        SaveSystem.clear();
-        
-        document.body.style.cursor = 'default';
-        fetchGlobalScores(); 
-        if (checkIsHighScore(score)) { 
-            gameState = 'INPUT'; 
-            messageBox.classList.add('hidden'); 
-            highscoreInput.classList.remove('hidden'); 
-            initialsField.value = ""; 
-            initialsField.focus(); 
-        } else { 
-            showLeaderboard(); 
-        }
+        gameOver(); // 👈 기존 내부 코드를 전부 지우고 이 한 줄로 깔끔하게 통합하세나!
     }
 	
     if ((e.key === 'b' || e.key === 'B') && gameState === 'PLAY') {
