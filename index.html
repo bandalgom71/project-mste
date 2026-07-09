@@ -103,8 +103,6 @@
 
 // 🛸 [MSTE v9.0] Supabase 기지국 및 마스터 열쇠 배선 완비
 const PROJECT_ID = "oochauzsxeqcvxsscztm";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."; // ⚠️ 여기에 자네의 진짜 레거시 eyJ... 장문 열쇠를 통째로 넣으시게!
-
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const messageBox = document.getElementById('message-box');
@@ -642,7 +640,7 @@ async function fetchGlobalScores(targetName = "") {
                 'apikey': SUPABASE_ANON_KEY,
                 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
             },
-            body: JSON.stringify({ player_score: finalScore })
+            body: JSON.stringify({ player_score: score })
         });
         
         if (response.ok) {
