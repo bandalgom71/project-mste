@@ -100,6 +100,23 @@
  * - Feature: 7 Grid System applied safely.
  * - Fix: isFetching variable explicitly declared to prevent ReferenceError.
  */
+ 
+// =================================================================
+// 🎯 [로건의 전장 시뮬레이터] 자동 스크롤 연출 테스트용 마스터 제어판
+// =================================================================
+const DEBUG_MODE = {
+  enable: true,       // 💡 테스트할 때는 true, 실제 게임 출시할 때는 false로 끄면 되네!
+  testTier: 2,        // 💡 테스트하고 싶은 계급 번호 (1 ~ 5)를 입력하시게.
+  mockUserRank: 5 // 💡 2티어 테스트용 가상 내 등수 (예: 50000등)
+};
+
+// 스크롤 물리 연산을 구동하기 위한 테스트용 전역 상태 장치들
+let scrollY = 0;
+let targetScrollY = 0;
+let scrollSpeed = 0;
+let isScrollFinished = false;
+let testLeaderboardData = []; // 서버 RPC 대신 스크롤 공간을 채울 250명의 가상 대군 가방
+// =================================================================
 
 // 🛸 [MSTE v9.0] Supabase 기지국 및 마스터 열쇠 배선 완비
 const PROJECT_ID = "oochauzsxeqcvxsscztm";
@@ -1541,6 +1558,42 @@ function spawnExplosion(x, y, tier, textValue, damageVal, multiplier) {
 function update(dt) {
 	if (gameState === 'PAUSE') return;
 	
+	// =================================================================
+    // 🎯 [디버그 시뮬레이터] 2티어: 초고속 롤업 후 감속 락온 물리 엔진
+    // =================================================================
+    if (gameState === 'LEADERBOARD' && DEBUG_MODE.enable) {
+        if (!isScrollFinished) {
+            // 1. 목적지까지 남은 거리 계산
+            let distance = targetScrollY - scrollY;
+            let dir = Math.sign(distance); // 🧭 이동 방향 판별 (+1 이면 아래로, -1 이면 위로)
+            
+            // 2. 자네가 정한 순정 감속 기어 1.0
+            let lerpFactor = 1.0 * (dt / TIME_SCALE); 
+            let step = distance * lerpFactor;
+
+            // 🛑 [최저 속도 리미터 다이얼]
+            // 마지막에 처지는 걸 막기 위한 프레임당 최소 이동 픽셀이라네.
+            // 1.0 ~ 2.5 사이에서 만져보시게. 숫자가 클수록 마지막에 턱! 하고 절도 있게 걸리네.
+            let minStep = 1.5 * (dt / TIME_SCALE); 
+
+            // 3. [최저 속도 가드]: 계산된 속도가 리미터보다 느려지면 최저 속도로 강제 등속 주행!
+            if (Math.abs(step) < minStep) {
+                step = dir * minStep;
+            }
+
+            // 4. [오버슈트 방지]: 남은 거리보다 움직일 스텝이 더 크면, 딱 남은 거리만큼만 가고 종료!
+            if (Math.abs(step) >= Math.abs(distance)) {
+                step = distance;
+                isScrollFinished = true;
+                console.log("🎯 [시뮬레이터] 최저 속도 가드로 늘어짐 없이 절도 있게 락온 완공!");
+            }
+
+            // 5. 최종 좌표 갱신
+            scrollY += step;
+        }
+    }
+    // =================================================================
+	
 	// 🛸 [로건의 TITLEWARP 인트로 타임라인 관리자]
     if (gameState === 'TITLEWARP') {
         titleWarpTimer += dt / TIME_SCALE;
@@ -2578,53 +2631,83 @@ function draw() {
             ctx.fillStyle = '#cccccc'; ctx.font = '30px "Neo Dunggeunmo"'; ctx.fillText("FETCHING DATA...", GAME_WIDTH/2, GAME_HEIGHT/2); 
         } 
         else {
-            let startY = 220;
-            
-            globalScores.forEach((row, i) => {
-                // 🛸 [가시성 패치]: 내 등수 주변이므로 1,2,3등 색상 분기 대신, 위에서부터 자연스럽게 그러데이션 페이드아웃 처리하네!
-                ctx.fillStyle = (i < 3) ? '#ffffff' : (i < 10) ? '#cccccc' : (i < 16) ? '#999999' : '#666666';
-                
-                // 1. 🎯 [등수 출력 개조]: i+1이 아니라 서버가 준 진짜 등수(row.rank)를 출력!
-                // (6자리 등수 "100000."이 국기를 침범하지 않도록 120px 축 기준 우측 정렬로 락온!)
+            // =================================================================
+            // 🎯 [디버그 시뮬레이터] 오버랩 진압 및 20인 제한 가드가 탑재된 정밀 드로잉 모듈
+            // =================================================================
+            testLeaderboardData.forEach((row) => {
+                const rowHeight = 28;
+                let currentY = 240 + (row.rank * rowHeight) - scrollY;
+
+                // 📐 currentY는 행의 '천장' 고도이므로, 이 필터가 정확히 22개의 행을 솎아내네!
+                if (currentY < 220 || currentY >= 828) return;
+
+                let isMe = (row.name === "XX YOU");
+                ctx.fillStyle = isMe ? '#ffffff' : '#888888';
+                ctx.font = isMe ? 'bold 24px "Neo Dunggeunmo"' : '24px "Neo Dunggeunmo"';
+
+                // 1. 등수 출력 (Y 좌표에 + 22 보정)
                 ctx.textAlign = 'right';
-                ctx.fillText(`${row.rank}.`, 110, 180 + i * 28);
-                
-                // 2. 이름 데이터 분석 ("KR LOGAN" -> 국가코드 "KR"과 이름 "LOGAN" 분리)
+                ctx.fillText(`${row.rank}`, 125, currentY + 22); // 👈 currentY에서 변경
+
+                // 2. 소속 마크 출력 (Y 좌표에 + 22 보정)
                 ctx.textAlign = 'left';
-                let firstSpace = row.name.indexOf(" ");
-                let countryCode = "GLOBAL";
-                let displayName = row.name;
-                
-                if (firstSpace !== -1) {
-                    countryCode = row.name.substring(0, firstSpace);
-                    displayName = row.name.substring(firstSpace + 1);
-                }
-                
-                // 3. 국기 이미지 실시간 로드 및 렌더링
-                if (countryCode !== "GLOBAL") {
-                    let flagImg = new Image();                
-                    flagImg.src = `https://flagcdn.com/24x18/${countryCode.toLowerCase()}.png`;
-                                    
-                    flagImg.onload = function() {                    
-                        if (gameState === 'LEADERBOARD') {
-                            ctx.drawImage(flagImg, 140, 164 + i * 28, 24, 18);
-                        }
-                    };                
-                    ctx.drawImage(flagImg, 140, 164 + i * 28, 24, 18);			
-                } else {
-                    ctx.fillText("🌐", 140, 180 + i * 28);
-                }
-                
-                // 4. 순수 유저 닉네임 출력 (자네가 설계한 180px 황금 고도 사수)
-                ctx.fillText(displayName, 180, 180 + i * 28);
-                
-                // 5. 점수 출력 (520px 경계면 사수)
+                if (isMe) ctx.fillText("🌐", 155, currentY + 22); // 👈 currentY에서 변경
+                else ctx.fillText("👽", 155, currentY + 22);      // 👈 currentY에서 변경
+
+                // 3. 이름 출력 (Y 좌표에 + 22 보정)
+                let renderName = row.name.replace(/ /g, '_');
+                ctx.fillText(renderName, 195, currentY + 22);     // 👈 currentY에서 변경
+
+                // 4. 점수 표기 (Y 좌표에 + 22 보정)
                 ctx.textAlign = 'right';
-                ctx.fillText(row.score.toLocaleString(), 520, 180 + i * 28);
+                ctx.fillText(row.score.toLocaleString(), 535, currentY + 22); // 👈 currentY에서 변경
+
+                // 5. 내 등수 안착 완료 시 이니셜 입력 커서 렌더링 (Y 좌표에 + 22 보정)
+                if (isMe && isScrollFinished) {
+                    ctx.save();
+                    ctx.fillStyle = '#ffffff';
+                    if (Math.floor(Date.now() / 300) % 2 === 0) {
+                        let nameWidth = ctx.measureText(renderName).width;
+                        ctx.fillText("_", 195 + nameWidth + 4, currentY + 22); // 👈 currentY + 22 로 변경
+                    }
+                    ctx.restore();
+                }
             });
+			
+			// =================================================================
+            // 🖼️ [로건의 아케이드 뷰포트 마스크 회로]: 흰 라인 + 20px 차폐용 검은 띠
+            // =================================================================
+            ctx.save();
+
+            // 🔼 [1] 상단 프레임 레이어 (Y = 220 기준)
+            // 글자를 완벽하게 지워줄 20px 두께의 상단 검은색 장막 (Y: 200 ~ 220)
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 240 - 30, GAME_WIDTH, 30);
+
+            // 상단 경계선 가는 흰색 라인 투사
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(50, 235);  // 좌측 정렬선 근처(50px)에서 출발
+            ctx.lineTo(550, 235); // 우측 점수선 근처(550px)까지 칼각 연결
+            ctx.stroke();
+
+            // 🔽 [2] 하단 프레임 레이어 (Y = 836 기준)
+            // 글자를 완벽하게 지워줄 20px 두께의 하단 검은색 장막 (Y: 836 ~ 856)
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 826, GAME_WIDTH, 30);
+
+            // 하단 경계선 가는 흰색 라인 투사
+            ctx.beginPath();
+            ctx.moveTo(50, 831);
+            ctx.lineTo(550, 831);
+            ctx.stroke();
+
+            ctx.restore();
+            // =================================================================
                 
-            if (Math.floor(Date.now() / 500) % 2 === 0) { 
-                ctx.fillStyle = '#888888'; ctx.textAlign = 'center'; ctx.fillText("[ CLICK TO RESTART ]", GAME_WIDTH/2, GAME_HEIGHT - 50); 
+            if (isScrollFinished && Math.floor(Date.now() / 500) % 2 === 0) { 
+                ctx.fillStyle = '#666666'; ctx.textAlign = 'center'; ctx.fillText("[ CLICK TO RESTART ]", GAME_WIDTH/2, GAME_HEIGHT - 50); 
             }
         }
         
@@ -3080,6 +3163,82 @@ function gameLoop(currentTime) {
 }
 
 lastTime = performance.now();
+
+// =================================================================
+// 🚀 [인터셉트] 시작하자마자 타이틀을 찢고 지정된 티어의 스크롤 전선으로 즉시 사출!
+// =================================================================
+if (DEBUG_MODE.enable) {
+    SoundManager.init();
+    gameState = 'LEADERBOARD'; // 게임 상태를 즉시 랭킹판으로 강제 고정
+    
+    // 📐 테스트할 티어의 규칙에 맞춰 10번째 줄 앵커 기준 고도(Y) 세팅 함수 호출
+    setupScrollTest(DEBUG_MODE.testTier, DEBUG_MODE.mockUserRank);
+}
+
+function setupScrollTest(tier, myRank) {
+    testLeaderboardData = [];
+    const rowHeight = 28; // 자네 장부에 적힌 한 행의 고도(Y) 간격 28px
+    
+    let startTopRank = 1;  // 카메라가 최초로 비출 화면 최상단의 등수
+    let targetTopRank = 1; // 스크롤이 끝나고 정착했을 때 화면 최상단의 등수
+    
+    // [기획서 칼각 매핑 필터]
+    if (tier === 1) {
+        // 1티어: 201위가 10번째 줄에 대기 -> 최상단은 192위(201 - 10)
+        startTopRank = 201 - 10; 
+        targetTopRank = 1; // 1위~20위 표시이므로 최상단은 1위
+        score = 100000;    // 최상위권 점수 세팅
+    } 
+    else if (tier === 2) {
+        // 2티어: 내 순위+200위가 10번째 줄 대기 -> 최상단은 내순위+191위
+        startTopRank = (myRank + 200) - 10;
+        targetTopRank = myRank - 10; // 내 순위가 10번째 줄 안착 -> 최상단은 내순위-10
+        score = 100001 - myRank;
+    }
+    else if (tier === 3 || tier === 4 || tier === 5) {
+        // 3,4,5티어 공통: 최하단(99981~100000위) 고정 대기 -> 최상단은 99981위
+        startTopRank = 99981;
+        
+        if (tier === 5) targetTopRank = 99981; // 5티어는 스크롤 없음 (고정)
+        else targetTopRank = myRank - 10;      // 3,4티어는 내 순위가 10번째 줄 안착
+        
+        score = 100001 - myRank;
+    }
+
+    // 📊 카메라 이동 거리를 시각화하기 위해 가상의 250명 랭킹 장부 대량 복제 생성
+    let minRank = Math.min(startTopRank, targetTopRank) - 20;
+    let maxRank = Math.max(startTopRank, targetTopRank) + 35;
+    
+    for (let r = minRank; r <= maxRank; r++) {
+        if (r < 1 || r > 100000) continue;
+        testLeaderboardData.push({
+            rank: r,
+            name: r === myRank ? "XX YOU" : "XX ALIEN_" + r,
+            score: 100001 - r
+        });
+    }
+
+    // 📐 픽셀 좌표계 변환: 시작 Y좌표와 목적지 Y좌표를 칼각으로 타겟팅
+    // 랭킹 첫 줄이 시작되는 180px 고도를 원점으로 잡고 연산하네.
+    scrollY = startTopRank * rowHeight;
+    targetScrollY = targetTopRank * rowHeight;
+    
+	// =================================================================
+    // 🛡️ [우주 경계선 리미터]: 1위 위나 10만위 아래로 카메라 탈출 방지
+    // =================================================================
+    const minScroll = 1 * rowHeight;            // 1위가 맨 위 천장에 걸리는 절대 한계 고도
+    const maxScroll = (100000 - 20) * rowHeight; // 10만위 문지기가 바닥에 걸리는 절대 한계 고도
+
+    // 카메라의 시작 좌표와 최종 목적지를 우주의 시작과 끝 범위 안으로 강제 압착(Clamp)!
+    scrollY = Math.max(minScroll, Math.min(maxScroll, scrollY));
+    targetScrollY = Math.max(minScroll, Math.min(maxScroll, targetScrollY));
+    // =================================================================
+
+    isScrollFinished = false;
+    
+    console.log(`📡 [티어 ${tier} 시뮬레이터 가동] 시작고도: ${startTopRank}위, 목표고도: ${targetTopRank}위`);
+}
+
 requestAnimationFrame(gameLoop);
 
 </script>
