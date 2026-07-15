@@ -115,8 +115,20 @@ let scrollY = 0;
 let targetScrollY = 0;
 let scrollSpeed = 0;
 let isScrollFinished = false;
+let isKeyboardActive = false;     // 🔌 [신규] 자판의 전술 전원 실질 인가 상태 플래그
+let keyboardDelayTimer = 0;       // ⏱️ [신규] 전원 인가 지연 타이머
 let testLeaderboardData = []; // 서버 RPC 대신 스크롤 공간을 채울 250명의 가상 대군 가방
 // =================================================================
+// 🚀 [신규] S자형 댐퍼 가속 스크롤 전용 데이터 금고
+let startScrollY = 0;             // S자 이동의 시작점 기록계
+let scrollTimeActive = 0;         // 실시간 주행 타이머
+let scrollDelayTimer = 0;         // 0.6초 진입 대기 타이머
+// =================================================================
+// 🎰 [로건의 아케이드 슬롯머신 전용 데이터 금고]
+let displayedScore = 0;           // 화면에 실시간으로 차오르는 점수
+let scoreRollTimer = 0;           // 롤업 시간 계산용 타이머
+let scoreRollDuration = 3.0;      // ⏱️ [신규] 점수 크기에 따라 동적으로 결정될 롤업 한계 시간
+let scoreDisplayHoldTimer = 0;    // 롤업 완료 후 대기용 타이머
 
 // 🛸 [MSTE v9.0] Supabase 기지국 및 마스터 열쇠 배선 완비
 const PROJECT_ID = "oochauzsxeqcvxsscztm";
@@ -162,6 +174,9 @@ titleAdImg.src = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5v
 titleAdImg.onload = function() {
     isTitleAdLoaded = true;
 };
+
+// 📦 버추얼 키보드 초기화
+let virtualKeys = [];
 
 const PICKUP_COOLDOWN = 0.2; 
 
@@ -464,7 +479,26 @@ const SoundManager = {
         osc.start(now);
         osc.stop(now + 0.1);
     },
-    
+   
+	// 🎵 [신규] 레트로 칩튠 틱 사운드 발전기
+    playTickSound: function() {
+        if (!this.ctx || this.isMuted) return;
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        
+        osc.type = 'square'; // 레트로 게임기 특유의 스퀘어 파형
+        osc.frequency.setValueAtTime(400 + Math.random() * 500, now); // 400Hz ~ 900Hz 사이의 다이내믹 피치
+        
+        gain.gain.setValueAtTime(0.03, now); // 귀를 피로하게 하지 않는 소프트 아날로그 볼륨
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.04);
+        
+        osc.connect(gain);
+        gain.connect(this.masterGain);
+        osc.start(now);
+        osc.stop(now + 0.04);
+    },
+   
     playItemGet: function(type) {
         if (!this.ctx || this.isMuted) return;
         const now = this.ctx.currentTime;
@@ -1077,6 +1111,19 @@ function showLeaderboard() { gameState = 'LEADERBOARD'; messageBox.classList.add
 window.addEventListener('mousedown', (e) => { 
     SoundManager.resume();
     
+	// 🎰 [SCORE_DISPLAY] 상태 제어 스위치
+    if (gameState === 'SCORE_DISPLAY') {
+        let progress = scoreRollTimer / scoreRollDuration;
+        if (progress < 1.0) {
+            // 🚫 [입력 봉쇄] 점수가 롤업되는 도중에는 어떠한 탭 클릭도 무시하네!
+            return;
+        } else {
+            // 🔓 [스킵 허용] 롤업이 완전히 끝나 최종 수치가 고정된 상태에서만 즉시 이동!
+            gameState = 'INPUT';
+        }
+        return;
+    }	
+	
     if (gameState === 'PAUSE') {
         gameState = 'PLAY';
         justResumed = true;
@@ -1140,6 +1187,20 @@ window.addEventListener('mousedown', (e) => {
 window.addEventListener('touchstart', (e) => { 
     SoundManager.resume();
     
+	// 🎰 [SCORE_DISPLAY] 상태 제어 스위치
+    if (gameState === 'SCORE_DISPLAY') {
+        e.preventDefault();
+        let progress = scoreRollTimer / scoreRollDuration;
+        if (progress < 1.0) {
+            // 🚫 [입력 봉쇄] 모바일 터치 역시 도중 스킵 원천 차단!
+            return;
+        } else {
+            // 🔓 [스킵 허용] 완료 상태에서 터치 시 리더보드로 즉시 도약!
+            gameState = 'INPUT';
+        }
+        return;
+    }		
+	
     if (gameState === 'PAUSE') {
         gameState = 'PLAY';
         justResumed = true;
@@ -1558,38 +1619,68 @@ function spawnExplosion(x, y, tier, textValue, damageVal, multiplier) {
 function update(dt) {
 	if (gameState === 'PAUSE') return;
 	
+	// 🎰 [로건의 최대 3초 유동적 점수 롤업 및 입력 봉쇄 엔진]
+	if (gameState === 'SCORE_DISPLAY') {
+        scoreRollTimer += dt / TIME_SCALE;
+        let progress = Math.min(1.0, scoreRollTimer / scoreRollDuration); // 동적 한계 시간 대비 진행률 계산
+        
+        // 감속 곡선(easeOutQuad)을 줘서 마지막에 툭 정지하는 묵직한 카타르시스 부여!
+        let ease = 1 - Math.pow(1 - progress, 2); 
+        
+        let prevScore = displayedScore;
+        displayedScore = Math.floor(ease * score);
+        
+        // 점수가 실제로 변하는 틱 프레임마다 경쾌한 칩튠 소리 재생!
+        if (displayedScore > prevScore) {
+            SoundManager.playTickSound();
+        }
+        
+        // 롤업이 완벽히 정착한 시점부터 5.0초간의 여운 대기 타이머가 흐르기 시작하네!
+        if (progress >= 1.0) {
+            scoreDisplayHoldTimer += dt / TIME_SCALE;
+            if (scoreDisplayHoldTimer >= 8.0) { // 5초 대기 락온
+                gameState = 'INPUT';
+            }
+        }
+        updateStars(dt); // 점수가 올라가는 배경 뒤로 별무리만 부드럽게 흐르게 방치
+        return; // 이 상태일 때는 인게임 루프(충돌, 입력 등)를 전면 차단하네!
+	}
+	
 	// =================================================================
-    // 🎯 [디버그 시뮬레이터] 2티어: 초고속 롤업 후 감속 락온 물리 엔진
+    // 🎯 [로건의 SF 기계식 S자형 댐퍼 가속 및 0.6초 시동 대기 시스템]
     // =================================================================
-    if (gameState === 'LEADERBOARD' && DEBUG_MODE.enable) {
+    if ((gameState === 'LEADERBOARD' || gameState === 'INPUT') && DEBUG_MODE.enable) {
         if (!isScrollFinished) {
-            // 1. 목적지까지 남은 거리 계산
-            let distance = targetScrollY - scrollY;
-            let dir = Math.sign(distance); // 🧭 이동 방향 판별 (+1 이면 아래로, -1 이면 위로)
-            
-            // 2. 자네가 정한 순정 감속 기어 1.0
-            let lerpFactor = 1.0 * (dt / TIME_SCALE); 
-            let step = distance * lerpFactor;
+            if (scrollDelayTimer > 0) {
+                // 🔌 [1단계: 시동 대기] 진입 즉시 0.6초간 움직이지 않고 상황 인지 유도!
+                scrollDelayTimer -= dt / TIME_SCALE;
+                scrollY = startScrollY;
+            } else {
+                // 🔌 [2단계: S자 곡선 주행] 스르륵 출발해 최고속에 달한 뒤, 정착 고도에서 절도 있게 정지!
+                scrollTimeActive += dt / TIME_SCALE;
+                const SCROLL_DURATION = 2.2; // ⏱️ 현실 시간 2.2초 동안 아주 부드럽고 세련되게 움직이네!
+                let t = Math.min(1.0, scrollTimeActive / SCROLL_DURATION);
 
-            // 🛑 [최저 속도 리미터 다이얼]
-            // 마지막에 처지는 걸 막기 위한 프레임당 최소 이동 픽셀이라네.
-            // 1.0 ~ 2.5 사이에서 만져보시게. 숫자가 클수록 마지막에 턱! 하고 절도 있게 걸리네.
-            let minStep = 1.5 * (dt / TIME_SCALE); 
+                // 정교한 Cubic Ease-In-Out 곡선 공식으로 완벽한 가감속 동기화 실현
+                let ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 
-            // 3. [최저 속도 가드]: 계산된 속도가 리미터보다 느려지면 최저 속도로 강제 등속 주행!
-            if (Math.abs(step) < minStep) {
-                step = dir * minStep;
+                scrollY = startScrollY + (targetScrollY - startScrollY) * ease;
+
+                if (t >= 1.0) {
+                    scrollY = targetScrollY;
+                    isScrollFinished = true;
+                    keyboardDelayTimer = 0.35; // ⏱️ 정착 즉시 현실 시간 0.7초의 자판 지연 퓨즈 가동!
+                    console.log("🎯 [시뮬레이터] S자 스크롤 드라이브 완벽 도킹 성공!");
+                }
             }
-
-            // 4. [오버슈트 방지]: 남은 거리보다 움직일 스텝이 더 크면, 딱 남은 거리만큼만 가고 종료!
-            if (Math.abs(step) >= Math.abs(distance)) {
-                step = distance;
-                isScrollFinished = true;
-                console.log("🎯 [시뮬레이터] 최저 속도 가드로 늘어짐 없이 절도 있게 락온 완공!");
+        } else {
+            // 🔌 [3단계: 지연 공급] 정지 완료 후 0.7초 후에 비로소 자판 전원 공급!
+            if (keyboardDelayTimer > 0) {
+                keyboardDelayTimer -= dt;
+                if (keyboardDelayTimer <= 0) {
+                    isKeyboardActive = true; 
+                }
             }
-
-            // 5. 최종 좌표 갱신
-            scrollY += step;
         }
     }
     // =================================================================
@@ -2328,10 +2419,95 @@ function update(dt) {
 }
 
 function draw() {
-    ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
-    
+    ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);   
 	drawStars();
     
+	// 🎰 [로건의 SF 플로팅 글래스 패널 스코어 디스플레이]
+	if (gameState === 'SCORE_DISPLAY') {
+        ctx.save();
+        
+		// 📐 1. [유리 패널 설계 명세]
+		// 600x1000 화면 정중앙에 480x320 크기의 SF 터미널 패널을 띄우네!
+		const pw = 480, ph = 320;
+		const px = (GAME_WIDTH - pw) / 2;     // X좌표: 60
+		const py = (GAME_HEIGHT - ph) / 2;    // Y좌표: 340
+		const radius = 16;                     // 모서리 둥글기 수치
+
+		// 🌌 2. [패널 배경]: 반투명 장막으로 글자 가독성을 사수
+		// 이 영역 뒤로 지나가는 별들은 은은하게 어두워지며 우아한 심도(Depth)를 형성하지.
+		ctx.beginPath();
+		ctx.roundRect(px, py, pw, ph, radius);
+		ctx.fillStyle = 'rgba(10, 10, 10, 0.5)';
+		ctx.fill();
+
+		// 🔩 3. [패널 외곽 더블 베젤 프레임]: SF 콘솔 느낌을 주는 정밀 메카닉 라인 가동!
+		// 바깥쪽의 선명한 30% 백색 아웃라인
+		ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+		ctx.lineWidth = 2;
+		ctx.stroke();
+
+		// 안쪽 미세 오프셋(6px)의 차분한 8% 투명 섀도우 베젤
+		ctx.beginPath();
+		ctx.roundRect(px + 6, py + 6, pw - 12, ph - 12, radius - 4);
+		ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+		ctx.lineWidth = 1;
+		ctx.stroke();
+
+		// 📐 4. [모퉁이 L자 브래킷 장식]: 군용 하드웨어 느낌을 내기 위한 코너 브래킷 가이드라인 투사
+		ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+		ctx.lineWidth = 2;
+		const bLen = 12; // 브래킷 꺾쇠 길이
+
+		// 좌상단
+		ctx.beginPath(); ctx.moveTo(px + bLen, py); ctx.lineTo(px, py); ctx.lineTo(px, py + bLen); ctx.stroke();
+		// 우상단
+		ctx.beginPath(); ctx.moveTo(px + pw - bLen, py); ctx.lineTo(px + pw, py); ctx.lineTo(px + pw, py + bLen); ctx.stroke();
+		// 좌하단
+		ctx.beginPath(); ctx.moveTo(px, py + ph - bLen); ctx.lineTo(px, py + ph); ctx.lineTo(px + bLen, py + ph); ctx.stroke();
+		// 우하단
+		ctx.beginPath(); ctx.moveTo(px + pw - bLen, py + ph); ctx.lineTo(px + pw, py + ph); ctx.lineTo(px + pw, py + ph - bLen); ctx.stroke();
+
+		// 🛰️ 5. [SF 느와르 상단 데코 텍스트]: 스타일 B 장착!
+		ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+		ctx.font = '16px "Neo Dunggeunmo"';
+		ctx.textAlign = 'center';
+		ctx.textBaseline = 'middle';
+		ctx.fillText("[ SECURE DEFENSE SYSTEM - ONLINE ]", GAME_WIDTH / 2, py + 35);
+
+		// 🏆 6. "YOUR SCORE" 타이틀 각인 (36px 대형 포커스)
+		ctx.fillStyle = '#888888';
+		ctx.font = '36px "Neo Dunggeunmo"';
+		ctx.textAlign = 'center';
+		ctx.textBaseline = 'middle';
+		ctx.fillText("YOUR SCORE", GAME_WIDTH / 2, GAME_HEIGHT / 2 - 30); // 웅장한 가로 세로 정중앙 상단 이격!
+
+		// 💎 7. 점수 수치 렌더링 (백색 발광 아웃라인 네온 가공)
+		ctx.save();
+		ctx.shadowColor = '#ffffff';
+		ctx.shadowBlur = 15;
+		ctx.fillStyle = '#ffffff';
+		ctx.font = '72px "Neo Dunggeunmo"';
+		ctx.textAlign = 'center';
+		ctx.textBaseline = 'middle';
+		ctx.fillText(displayedScore.toLocaleString(), GAME_WIDTH / 2, GAME_HEIGHT / 2 + 50); // 하단 이격 배치
+		ctx.restore();
+
+		// 🛰️ 8. [SF 느와르 하단 데코 텍스트]
+		ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+		ctx.font = '14px "Neo Dunggeunmo"';
+		ctx.textAlign = 'center';
+		ctx.textBaseline = 'middle';
+		ctx.fillText("RECORDING TO DATABASE S-801...", GAME_WIDTH / 2, py + ph - 35);
+
+		// 🔳 9. [가장자리 보더라인 복구]: 탈출 직전 캔버스 외곽에 묵직한 베젤을 둘러 완결성을 고정하네!
+		ctx.strokeStyle = '#333';
+		ctx.lineWidth = 2;
+		ctx.strokeRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+
+		ctx.restore();
+		return; // 조기 탈출 가드로 아래쪽 플레이 렌더링 봉쇄!
+	}
+	
 	// 🛸 [로건의 타이틀 전용 다층 타원형 부유 엔진 (Parallax Ellipse Floating)]
         if (gameState === 'START' || gameState === 'TITLEWARP') { // 🛠️ 가드 전면 개방!
             let t = performance.now() * 0.001; 
@@ -2618,11 +2794,11 @@ function draw() {
         } // 🛡️ 텍스트 격리 방화벽 닫힘
     }
 	
-	if (gameState === 'LEADERBOARD' || gameState === 'UPLOADING') {
+	if (gameState === 'LEADERBOARD' || gameState === 'UPLOADING' || gameState === 'INPUT') {
         document.querySelectorAll('.ingame-ad').forEach(el => el.remove());
         ctx.save(); ctx.fillStyle = '#ffffff'; ctx.font = 'bold 40px "Neo Dunggeunmo"'; ctx.textAlign = 'center';
         ctx.fillText("GLOBAL RANKING", GAME_WIDTH/2, 100); ctx.fillStyle = '#bbbbbb'; ctx.font = '24px "Neo Dunggeunmo"';
-        ctx.fillText(`YOUR SCORE: ${score}`, GAME_WIDTH/2, 150);
+        // ctx.fillText(`YOUR SCORE: ${score}`, GAME_WIDTH/2, 150);
         
         if (gameState === 'UPLOADING') { 
             ctx.fillStyle = '#cccccc'; ctx.font = '30px "Neo Dunggeunmo"'; ctx.fillText("UPLOADING TO SERVER...", GAME_WIDTH/2, GAME_HEIGHT/2); 
@@ -2636,10 +2812,10 @@ function draw() {
             // =================================================================
             testLeaderboardData.forEach((row) => {
                 const rowHeight = 28;
-                let currentY = 240 + (row.rank * rowHeight) - scrollY;
+                let currentY = 140 + (row.rank * rowHeight) - scrollY;
 
                 // 📐 currentY는 행의 '천장' 고도이므로, 이 필터가 정확히 22개의 행을 솎아내네!
-                if (currentY < 220 || currentY >= 828) return;
+                if (currentY < 120 || currentY >= 728) return;
 
                 let isMe = (row.name === "XX YOU");
                 ctx.fillStyle = isMe ? '#ffffff' : '#888888';
@@ -2680,35 +2856,93 @@ function draw() {
             ctx.save();
 
             // 🔼 [1] 상단 프레임 레이어 (Y = 220 기준)
-            // 글자를 완벽하게 지워줄 20px 두께의 상단 검은색 장막 (Y: 200 ~ 220)
+            // 글자를 완벽하게 지워줄 20px 두께의 상단 검은색 장막
             ctx.fillStyle = '#000000';
-            ctx.fillRect(0, 240 - 30, GAME_WIDTH, 30);
+            ctx.fillRect(0, 140 - 30, GAME_WIDTH, 30);
 
             // 상단 경계선 가는 흰색 라인 투사
             ctx.strokeStyle = '#ffffff';
             ctx.lineWidth = 1;
             ctx.beginPath();
-            ctx.moveTo(50, 235);  // 좌측 정렬선 근처(50px)에서 출발
-            ctx.lineTo(550, 235); // 우측 점수선 근처(550px)까지 칼각 연결
+            ctx.moveTo(50, 135);  // 좌측 정렬선 근처(50px)에서 출발
+            ctx.lineTo(550, 135); // 우측 점수선 근처(550px)까지 칼각 연결
             ctx.stroke();
 
             // 🔽 [2] 하단 프레임 레이어 (Y = 836 기준)
             // 글자를 완벽하게 지워줄 20px 두께의 하단 검은색 장막 (Y: 836 ~ 856)
             ctx.fillStyle = '#000000';
-            ctx.fillRect(0, 826, GAME_WIDTH, 30);
+            ctx.fillRect(0, 726, GAME_WIDTH, 30);
 
             // 하단 경계선 가는 흰색 라인 투사
             ctx.beginPath();
-            ctx.moveTo(50, 831);
-            ctx.lineTo(550, 831);
+            ctx.moveTo(50, 731);
+            ctx.lineTo(550, 731);
             ctx.stroke();
 
             ctx.restore();
             // =================================================================
-                
-            if (isScrollFinished && Math.floor(Date.now() / 500) % 2 === 0) { 
-                ctx.fillStyle = '#666666'; ctx.textAlign = 'center'; ctx.fillText("[ CLICK TO RESTART ]", GAME_WIDTH/2, GAME_HEIGHT - 50); 
-            }
+			// 👽 [로건의 아케이드 11열 가상 키보드 - 전원 온/오프 디지털 연출 버전]
+			if (gameState === 'INPUT') {
+				virtualKeys.forEach(key => {
+					ctx.save();
+					ctx.beginPath();
+					
+					// 1. 모서리 반경 12px 둥근 사각형 기틀
+					ctx.roundRect(key.x, key.currentY, key.width, key.height, 12);
+					
+					// 2. [키 배경]: 스크롤 완료 여부에 따라 불이 켜지는 강도 조율
+					if (isKeyboardActive) {
+						// 🔌 [전원 ON] 스크롤 정착 완료 상태
+						if (key.char === '⌫' || key.char === 'OK' || key.char === 'SPACE' || key.char === 'DONE') {
+							ctx.fillStyle = 'rgba(255, 255, 255, 0.75)'; // 제어키 75% 불투명 흰색
+						} else {
+							ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';  // 일반키 50% 불투명 흰색
+						}
+					} else {
+						// 🔌 [전원 OFF] 스크롤 대기 상태 (자네가 조율한 15% 어두운 패널)
+						if (key.char === '⌫' || key.char === 'OK' || key.char === 'SPACE' || key.char === 'DONE') {
+							ctx.fillStyle = 'rgba(255, 255, 255, 0.15)'; // 제어키 15% 반투명
+						} else {
+							ctx.fillStyle = 'rgba(255, 255, 255, 0.15)'; // 일반키 15% 반투명
+						}
+					}
+					ctx.fill();
+
+					// 3. [키 테두리]: 경계 유지를 위한 은은한 아웃라인 (동일 유지)
+					ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+					ctx.lineWidth = 1;
+					ctx.stroke();
+
+					// 4. [글씨 색상]: 전원 인가 시 고대비 시인성 사수
+					if (isKeyboardActive) {
+						// 🔌 [전원 ON]
+						if (key.char === '⌫' || key.char === 'OK' || key.char === 'SPACE' || key.char === 'DONE') {
+							ctx.fillStyle = '#000000'; // 제어키는 묵직한 검은색 유지
+						} else {
+							ctx.fillStyle = '#ffffff'; // 일반키는 선명한 순백색으로 전원 인가!
+						}
+					} else {
+						// 🔌 [전원 OFF] 어두운 검은색으로 패널에 묻어둠
+						ctx.fillStyle = '#000000';
+					}
+
+					// 5. [글자 크기 및 배치]
+					if (key.char === 'SPACE' || key.char === '⌫' || key.char === 'OK' || key.char === 'DONE') {
+						ctx.font = '22px "Neo Dunggeunmo"';
+					} else {
+						ctx.font = '28px "Neo Dunggeunmo"';
+					}
+					ctx.textAlign = 'center';
+					ctx.textBaseline = 'middle';
+					
+					ctx.fillText(key.char, key.x + key.width / 2, key.currentY + key.height / 2 + 2);
+					ctx.restore();
+				});
+			}
+			
+            if (gameState === 'LEADERBOARD' && isScrollFinished && Math.floor(Date.now() / 500) % 2 === 0) { 
+				ctx.fillStyle = '#666666'; ctx.textAlign = 'center'; ctx.fillText("[ CLICK TO RESTART ]", GAME_WIDTH/2, GAME_HEIGHT - 50); 
+			}
         }
         
         ctx.restore(); return;
@@ -2753,7 +2987,7 @@ function draw() {
 		});
 	}
 		
-	if (gameState === 'INPUT' || gameState === 'CRASHED') ctx.globalAlpha = (gameState === 'CRASHED' ? 1.0 : 0.3);
+	if (gameState === 'CRASHED') ctx.globalAlpha = 1.0;
         ctx.fillStyle = '#fff'; ctx.font = 'bold 24px "Neo Dunggeunmo"'; ctx.textAlign = 'left'; ctx.fillText(`LV: ${currentLevel}`, 20, 30);
         ctx.textAlign = 'center'; ctx.fillText(`SCORE: ${score}`, GAME_WIDTH / 2, 30); ctx.textAlign = 'right'; ctx.fillStyle = '#cccccc';
         let hearts = "♥".repeat(Math.max(0, lives)); ctx.fillText(`LIVES: ${hearts}`, GAME_WIDTH - 20, 30);
@@ -3168,11 +3402,21 @@ lastTime = performance.now();
 // 🚀 [인터셉트] 시작하자마자 타이틀을 찢고 지정된 티어의 스크롤 전선으로 즉시 사출!
 // =================================================================
 if (DEBUG_MODE.enable) {
-    SoundManager.init();
-    gameState = 'LEADERBOARD'; // 게임 상태를 즉시 랭킹판으로 강제 고정
-    
-    // 📐 테스트할 티어의 규칙에 맞춰 10번째 줄 앵커 기준 고도(Y) 세팅 함수 호출
+    // 1️⃣ [선제 타격]: 가상 랭킹판 정보와 내 가상 스코어(99,996점)를 메모리에 먼저 안전하게 주입하네!
     setupScrollTest(DEBUG_MODE.testTier, DEBUG_MODE.mockUserRank);
+    initVirtualKeyboard();
+
+    // 2️⃣ [정밀 역산]: 주입된 스코어를 기반으로 롤업 지속 시간(최대 3초)을 정상 계산하네! (이제 3초 꽉 채워 돌 걸세!)
+    scoreRollDuration = Math.max(0.5, Math.min(3.0, score / 15000));
+
+    // 3️⃣ [점수판 작동]: 슬롯머신 구역 전원 통전 및 상태 초기화
+    gameState = 'SCORE_DISPLAY'; 
+    displayedScore = 0;          // 실시간 카운터 리셋
+    scoreRollTimer = 0;          // 타이머 리셋
+    scoreDisplayHoldTimer = 0;   // 대기 타이머 리셋
+
+    isFetching = false;
+    isScrollFinished = false;    // 랭킹 스크롤은 점수판이 끝난 뒤에 구동되도록 대기
 }
 
 function setupScrollTest(tier, myRank) {
@@ -3235,8 +3479,69 @@ function setupScrollTest(tier, myRank) {
     // =================================================================
 
     isScrollFinished = false;
-    
+    isKeyboardActive = false;   // 🔌 자판 전원 다시 꺼진 대기 상태로 초기화!
+    keyboardDelayTimer = 0;     // ⏱️ 지연 타이머 초기화!
+	
+	// 카메라의 시작 좌표와 최종 목적지를 우주의 시작과 끝 범위 안으로 강제 압착(Clamp)!
+	scrollY = Math.max(minScroll, Math.min(maxScroll, scrollY));
+	targetScrollY = Math.max(minScroll, Math.min(maxScroll, targetScrollY));
+	// =================================================================
+
+	isScrollFinished = false;
+	isKeyboardActive = false;   // 🔌 자판 전원 다시 꺼진 대기 상태로 초기화!
+	keyboardDelayTimer = 0;     // ⏱️ 지연 타이머 초기화!
+
+	// 🚀 [4단계 삽입 위치]: S자 댐퍼 스크롤 초기화 연산 코드를 여기에 납땜하네!
+	startScrollY = scrollY;     // 출발 좌표 기록
+	scrollTimeActive = 0;       // 주행 타이머 초기화
+	scrollDelayTimer = 0.6;     // ⏱️ 랭킹 진입 시 정지 대기 시간 0.6초 세팅!
+	
     console.log(`📡 [티어 ${tier} 시뮬레이터 가동] 시작고도: ${startTopRank}위, 목표고도: ${targetTopRank}위`);
+}
+
+// 🛠️ 버추얼키보드
+function initVirtualKeyboard() {
+    // 내부에서만 쓰는 지역 변수들
+    const rows = [
+        ["!", "1", "2", "3", "4", "5", "6", "7", "8", "9", "0"],
+        ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P", "⌫"],
+        ["A", "S", "D", "F", "G", "H", "J", "K", "L", { char: "OK", span: 2 }],
+        ["Z", "X", "C", "V", "B", "N", "M", { char: "SPACE", span: 4 }]
+    ];
+
+    const startX = 17;     
+    const startY = 754;     
+    const keyW = 46;        
+    const keyH = 50;        
+    const gap = 6;          
+
+    virtualKeys = []; // 상단에 선언해 둔 전역 배열에 데이터를 채워 넣음
+
+    for (let r = 0; r < rows.length; r++) {
+        let colIndex = 0;
+        const rowData = rows[r];
+        for (let i = 0; i < rowData.length; i++) {
+            const item = rowData[i];
+            let char = typeof item === 'string' ? item : item.char;
+            let span = typeof item === 'string' ? 1 : item.span;
+
+            let width = span * keyW + (span - 1) * gap;
+            let x = startX + colIndex * (keyW + gap);
+            let y = startY + r * (keyH + gap);
+
+            virtualKeys.push({
+                char: char,
+                x: x,
+                targetY: y,
+                currentY: y,
+                width: width,
+                height: keyH,
+                state: 'ACTIVE'
+            });
+
+            colIndex += span;
+        }
+    }
 }
 
 requestAnimationFrame(gameLoop);
