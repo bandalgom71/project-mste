@@ -107,10 +107,10 @@
 const DEBUG_MODE = {
   enable: true,       // 💡 테스트할 때는 true, 실제 게임 출시할 때는 false로 끄면 되네!
   testTier: 2,        // 💡 테스트하고 싶은 계급 번호 (1 ~ 5)를 입력하시게.
-  mockUserRank: 100005 // 💡 2티어 테스트용 가상 내 등수 (예: 50000등)
+  mockUserRank: 1 // 💡 2티어 테스트용 가상 내 등수 (예: 50000등)
 };
 
-// 스크롤 물리 연산을 구동하기 위한 테스트용 전역 상태 장치들
+// 랭킹판용 변수들
 let scrollY = 0;
 let targetScrollY = 0;
 let scrollSpeed = 0;
@@ -118,6 +118,8 @@ let isScrollFinished = false;
 let isKeyboardActive = false;     // 🔌 [신규] 자판의 전술 전원 실질 인가 상태 플래그
 let keyboardDelayTimer = 0;       // ⏱️ [신규] 전원 인가 지연 타이머
 let testLeaderboardData = []; // 서버 RPC 대신 스크롤 공간을 채울 250명의 가상 대군 가방
+let currentInputName = "";    // 유저가 입력하는 순수 동적 이름 보관함
+let cursorStartTime = 0;
 // =================================================================
 // 🚀 [신규] S자형 댐퍼 가속 스크롤 전용 데이터 금고
 let startScrollY = 0;             // S자 이동의 시작점 기록계
@@ -1672,24 +1674,35 @@ function update(dt) {
                 scrollDelayTimer -= dt / TIME_SCALE;
                 scrollY = startScrollY;
             } else {
-                // 🔌 [2단계: S자 곡선 주행] 스르륵 출발해 최고속에 달한 뒤, 정착 고도에서 절도 있게 정지!
-                scrollTimeActive += dt / TIME_SCALE;
-                const SCROLL_DURATION = 7; // ⏱️ 현실 시간 2.2초 동안 아주 부드럽고 세련되게 움직이네!
-                let t = Math.min(1.0, scrollTimeActive / SCROLL_DURATION);
+                // 💡 [자네의 기획 반영]: 스크롤 거리 계산 후 동적 분기 처리
+                let scrollDist = Math.abs(targetScrollY - startScrollY);
 
-                // 정교한 Cubic Ease-In-Out 곡선 공식으로 완벽한 가감속 동기화 실현
-                let ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-
-                scrollY = startScrollY + (targetScrollY - startScrollY) * ease;
-
-                if (t >= 1.0) {
+                if (scrollDist === 0) {
+                    // 3. 스크롤이 없는 경우: 0.6초 대기 종료 즉시 완료 상태로 도킹!
                     scrollY = targetScrollY;
                     isScrollFinished = true;
-                    keyboardDelayTimer = 0.35; // ⏱️ 정착 즉시 현실 시간 0.7초의 자판 지연 퓨즈 가동!
-                    console.log("🎯 [시뮬레이터] S자 스크롤 드라이브 완벽 도킹 성공!");
+                    keyboardDelayTimer = 0.35;
+                } else {
+                    // 1, 2. 스크롤이 있는 경우: 거리에 비례하여 주행 시간(Duration)을 역산
+                    scrollTimeActive += dt / TIME_SCALE;
+                    
+                    // 거리가 짧을수록 연출 시간을 동적으로 줄여 지루함을 방지하네. (최소 1.2초 ~ 최대 7.0초)
+                    let dynamicDuration = Math.max(1.2, Math.min(7.0, scrollDist / 200)); 
+                    let t = Math.min(1.0, scrollTimeActive / dynamicDuration);
+
+                    // Cubic Ease-In-Out 보간 연산(Interpolation calculation)으로 가감속 구현
+                    let ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+                    scrollY = startScrollY + (targetScrollY - startScrollY) * ease;
+
+                    if (t >= 1.0) {
+                        scrollY = targetScrollY;
+                        isScrollFinished = true;
+                        keyboardDelayTimer = 0.35;
+                        console.log("🎯 [시뮬레이터] S자 가변 스크롤 드라이브 도킹 완료!");
+                    }
                 }
-            }
-        } else {
+			}
+            } else {
             // 🔌 [3단계: 지연 공급] 정지 완료 후 0.7초 후에 비로소 자판 전원 공급!
             if (keyboardDelayTimer > 0) {
                 keyboardDelayTimer -= dt;
@@ -2907,34 +2920,52 @@ function draw() {
                 // 📐 currentY는 행의 '천장' 고도이므로, 이 필터가 정확히 22개의 행을 솎아내네!
                 if (currentY < 120 || currentY >= 728) return;
 
-                let isMe = (row.name === "XX YOU");
+				let isMe = row.isMe; 
                 ctx.fillStyle = isMe ? '#ffffff' : '#888888';
                 ctx.font = isMe ? 'bold 24px "Neo Dunggeunmo"' : '24px "Neo Dunggeunmo"';
 
                 // 1. 등수 출력 (Y 좌표에 + 22 보정)
                 ctx.textAlign = 'right';
-                ctx.fillText(`${row.rank}`, 125, currentY + 22); // 👈 currentY에서 변경
+                ctx.fillText(`${row.rank}`, 125, currentY + 22);
 
                 // 2. 소속 마크 출력 (Y 좌표에 + 22 보정)
                 ctx.textAlign = 'left';
-                if (isMe) ctx.fillText("🌐", 155, currentY + 22); // 👈 currentY에서 변경
-                else ctx.fillText("👽", 155, currentY + 22);      // 👈 currentY에서 변경
+                if (isMe) {
+                    // 💡 [원인 해결 2]: 하드코딩된 지구본 대신, 현재 시스템의 타임존을 파싱하여 태극기를 동적 매핑하네!
+                    let flagEmoji = "🌐";
+                    try {
+                        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+                        if (tz && tz.includes("Seoul")) {
+                            flagEmoji = "🇰🇷";
+                        }
+                    } catch(e) {}
+                    ctx.fillText(flagEmoji, 155, currentY + 22);
+                } else {
+                    ctx.fillText("👽", 155, currentY + 22);
+                }
 
                 // 3. 이름 출력 (Y 좌표에 + 22 보정)
-                let renderName = row.name.replace(/ /g, '_');
-                ctx.fillText(renderName, 195, currentY + 22);     // 👈 currentY에서 변경
+				// 💡 [기획 반영]: 내 행(isMe)일 때는 국가코드 없이 순수 입력값(currentInputName)만 언더바 치환하여 드로우!
+				let renderName = isMe ? currentInputName.replace(/ /g, '_') : row.name.replace(/ /g, '_');
+				ctx.fillText(renderName, 195, currentY + 22);
 
                 // 4. 점수 표기 (Y 좌표에 + 22 보정)
                 ctx.textAlign = 'right';
                 ctx.fillText(row.score.toLocaleString(), 535, currentY + 22); // 👈 currentY에서 변경
 
-                // 5. 내 등수 안착 완료 시 이니셜 입력 커서 렌더링 (Y 좌표에 + 22 보정)
+				// 5. 내 등수 안착 완료 시 이니셜 입력 커서 렌더링 (Y 좌표에 + 22 보정)
                 if (isMe && isScrollFinished) {
+                    // 스크롤이 끝난 첫 프레임에 현재 절대 시간을 기준점으로 딱 한 번 캡처하네.
+                    if (cursorStartTime === 0) cursorStartTime = Date.now();
+
                     ctx.save();
                     ctx.fillStyle = '#ffffff';
-                    if (Math.floor(Date.now() / 300) % 2 === 0) {
+                    
+                    // 💡 [상대 시간 연산]: 기준점으로부터 흘러간 밀리초를 역산하여 700ms 깜빡임을 구현하네!
+                    if (Math.floor((Date.now() - cursorStartTime) / 700) % 2 === 0) {
                         let nameWidth = ctx.measureText(renderName).width;
-                        ctx.fillText("_", 195 + nameWidth + 4, currentY + 22); // 👈 currentY + 22 로 변경
+                        // 💡 [기획 반영]: 공백(_)과의 시각적 간섭을 회피하기 위해 블록 커서 "█" 사용!
+						ctx.fillText("█", 195 + nameWidth + 11, currentY + 20);
                     }
                     ctx.restore();
                 }
@@ -3546,12 +3577,13 @@ function setupScrollTest(tier, myRank) {
     let minRank = Math.min(startTopRank, targetTopRank) - 20;
     let maxRank = Math.max(startTopRank, targetTopRank) + 35;
     
-    for (let r = minRank; r <= maxRank; r++) {
+	for (let r = minRank; r <= maxRank; r++) {
         if (r < 1 || r > 100000) continue;
         testLeaderboardData.push({
             rank: r,
-            name: r === myRank ? "XX YOU" : "XX ALIEN_" + r,
-            score: 100001 - r
+            name: r === myRank ? "" : "XX ALIEN_" + r, // 내 등수는 빈 문자열로 시작!
+            score: 100001 - r,
+            isMe: r === myRank // 👈 내 등수인지 판독할 수 있는 플래그 신설
         });
     }
 
@@ -3574,6 +3606,7 @@ function setupScrollTest(tier, myRank) {
     isScrollFinished = false;
     isKeyboardActive = false;   // 🔌 자판 전원 다시 꺼진 대기 상태로 초기화!
     keyboardDelayTimer = 0;     // ⏱️ 지연 타이머 초기화!
+	cursorStartTime = 0;        // ⏱️ 새 스크롤 시작 시 커서 타이머 원점 초기화!
 	
 	// 카메라의 시작 좌표와 최종 목적지를 우주의 시작과 끝 범위 안으로 강제 압착(Clamp)!
 	scrollY = Math.max(minScroll, Math.min(maxScroll, scrollY));
