@@ -108,7 +108,7 @@ const DEBUG_MODE = {
   enable: true,       // 💡 테스트할 때는 true, 실제 게임 출시할 때는 false로 끄면 되네!
   testTier: 2,        // 💡 테스트하고 싶은 계급 번호 (1 ~ 5)를 입력하시게.
   //mockUserRank: 10 // 💡 2티어 테스트용 가상 내 등수 (예: 50000등)
-  mockUserScore: 506 //💡 등수 대신 가상 최종 점수 직격 입력
+  mockUserScore: 5008 //💡 등수 대신 가상 최종 점수 직격 입력
 };
 
 // 랭킹판용 변수들
@@ -133,6 +133,7 @@ let scoreRollTimer = 0;           // 롤업 시간 계산용 타이머
 let scoreRollDuration = 3.0;      // ⏱️ [신규] 점수 크기에 따라 동적으로 결정될 롤업 한계 시간
 let scoreDisplayHoldTimer = 0;    // 롤업 완료 후 대기용 타이머
 let isPlayerRanked = false;       // 👑 [신규] 10만 위 랭킹 진입 성공 여부 플래그
+let isFinalView = false;          // 랭킹보드 리뷰 화면 상태인가?
 
 // 🛸 [MSTE v9.0] Supabase 기지국 및 마스터 열쇠 배선 완비
 const PROJECT_ID = "oochauzsxeqcvxsscztm";
@@ -743,6 +744,7 @@ async function fetchGlobalScores(targetName = "") {
 			});
 			
 			// 데이터 정렬 완료 직후 더미 레코드(Dummy Record) 추가
+			globalScores.pop();
 			globalScores.push({
 				rank: '',
 				name: '---',
@@ -774,20 +776,25 @@ async function fetchGlobalScores(targetName = "") {
 				const rowHeight = 28;
 				const visibleRows = 22;
 				const maxScroll = (globalScores.length - visibleRows) * rowHeight;
- 
-				scrollY = maxScroll // 시작 고도: 최하단 정렬
- 
+
 				let myRow = globalScores.find(row => row.isMe);
 				let myVisualIndex = myRow ? myRow.visualIndex : 0;
- 
-				// 목표 고도: 내가 위에서 10번째 칸에 오도록, 상하단 예외 범위는 clamp
+
 				targetScrollY = Math.max(0, Math.min(maxScroll, (myVisualIndex - 10) * rowHeight));
- 
-				isScrollFinished = false;
-				startScrollY = scrollY;
-				scrollTimeActive = 0;
-				scrollDelayTimer = 0.6;
-			}			
+
+				if (isFinalView) {
+					// 최종 확정 화면: 스크롤 연출 없이 내 순위 위치에 즉시 카메라 고정
+					scrollY = targetScrollY;
+					isScrollFinished = true;
+				} else {
+					// 첫 진입: 기존 자동 스크롤 연출 가동
+					scrollY = maxScroll;
+					isScrollFinished = false;
+					startScrollY = scrollY;
+					scrollTimeActive = 0;
+					scrollDelayTimer = 0.6;
+				}
+			}		
             console.log("🔍 실데이터 진입 확인 — globalScores:", globalScores);  
         } else {
             console.error("❌ 랭킹 로드 실패:", await response.text());
@@ -801,9 +808,6 @@ async function fetchGlobalScores(targetName = "") {
 
 // 📡 플레이어의 국가코드+이름과 최종 점수를 슈파베이스 금고에 전격 다이렉트 주입하는 함수
 async function sendGlobalScore(fullName, finalScore) { 
-    gameState = 'UPLOADING'; 
-    highscoreInput.classList.add('hidden'); 
-    
     const URL = `https://${PROJECT_ID}.supabase.co/rest/v1/leaderboard`;
     
     try {
@@ -813,23 +817,18 @@ async function sendGlobalScore(fullName, finalScore) {
                 'Content-Type': 'application/json',
                 'apikey': SUPABASE_ANON_KEY,
                 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-                'Prefer': 'return=minimal' // 불필요한 반환값 억제로 네트워크 최적화
+                'Prefer': 'return=minimal'
             },
             body: JSON.stringify({ name: fullName, score: finalScore }) 
         });
         
         if (response.ok) {
-            console.log("🚀 슈파베이스 최종 등록 완료! 내 등수 주변 스캔 가동.");
-            // 내 점수가 반영된 새로운 주변 랭킹 21명을 정밀 사출하여 화면에 예열하네!
-            await fetchGlobalScores(fullName); 
-            setTimeout(showLeaderboard, 500); 
+            console.log("🚀 슈파베이스 최종 등록 완료!");
         } else {
             console.error("❌ 점수 전송 실패:", await response.text());
-            setTimeout(showLeaderboard, 500);
         }
     } catch(e) {
         console.error("❌ 업로드 장애 발생:", e);
-        setTimeout(showLeaderboard, 500);
     }
 }
 
@@ -981,15 +980,39 @@ messageBox.addEventListener('mousedown', handleUiClick);
 messageBox.addEventListener('touchstart', (e) => { e.preventDefault(); handleUiClick(); });
 function handleUiClick() { if (gameState === 'START' || gameState === 'LEADERBOARD') startGame(); else if (gameState === 'TRANSITION') startWarpDrive(); }
 
+// 2. submitBtn 클릭 이벤트 리스너 수정
 submitBtn.addEventListener('click', () => {
     const nameField = document.getElementById('initials');
+    
+    // 1. 입력창 포커스 강제 해제 (깜빡이는 커서 즉시 제거)
+    nameField.blur();
+    
+    // 2. 이름 입력 UI 상자 즉시 숨김
+    highscoreInput.classList.add('hidden');
+
+    // 3. 최종 확정 상태 전환 및 마우스 커서 숨김
+    isFinalView = true;
+    document.body.style.cursor = 'none';
+
     let name = nameField.value.trim().toUpperCase();
     if (name === "") name = "UNKNOWN";
     
-    // 💡 [중복 제거]: 추출한 국적 추정 함수를 호출하여 코드를 단축함
     let cc = getEstimatedCountryCode();
-    
     let fullName = cc + " " + name;
+
+    // 4. 로컬 메모리(globalScores) 데이터 즉시 갱신
+    currentInputName = name;
+    let myRow = globalScores.find(r => r.isMe);
+    if (myRow) {
+        myRow.name = fullName;
+    }
+
+    // 5. 카메라 위치 즉시 내 순위에 도킹 및 화면 전환
+    scrollY = targetScrollY;
+    isScrollFinished = true;
+    showLeaderboard();
+
+    // 6. 백그라운드 DB 전송
     sendGlobalScore(fullName, score);
 });
 
@@ -3061,7 +3084,7 @@ function draw() {
 				ctx.fillText(row.score.toLocaleString(), 535, currentY + 22);
 
 				// 5️⃣ 플레이어 본인 전용 이니셜 입력 커서(Cursor) 깜빡임 연출
-				if (isMe && isScrollFinished && currentInputName.length < 15) {
+				if (isMe && isScrollFinished && !isFinalView && currentInputName.length < 15) {
 					if (cursorStartTime === 0) cursorStartTime = Date.now();
 					ctx.save();
 					ctx.fillStyle = '#ffffff';
@@ -3733,7 +3756,7 @@ function setupScrollTest(tier, myScore) {
     const maxScroll = Math.max(0, (testLeaderboardData.length - visibleRows) * rowHeight);
 
     // [시작 고도] 최하단 레코드를 보드 최하단에 정렬 (하단 공란 방지)
-    scrollY = maxScroll;
+    // scrollY = maxScroll;
 
     // [플레이어 탐색] 내 데이터의 절대 슬롯 인덱스 확보
     let myRow = testLeaderboardData.find(row => row.isMe || row.name === 'YOU');
