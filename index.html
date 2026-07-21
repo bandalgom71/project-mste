@@ -105,10 +105,9 @@
 // 🎯 [로건의 전장 시뮬레이터] 자동 스크롤 연출 테스트용 마스터 제어판
 // =================================================================
 const DEBUG_MODE = {
-  enable: true,       // 💡 테스트할 때는 true, 실제 게임 출시할 때는 false로 끄면 되네!
+  enable: false,       // 💡 테스트할 때는 true, 실제 게임 출시할 때는 false로 끄면 되네!
   testTier: 2,        // 💡 테스트하고 싶은 계급 번호 (1 ~ 5)를 입력하시게.
-  //mockUserRank: 10 // 💡 2티어 테스트용 가상 내 등수 (예: 50000등)
-  mockUserScore: 5008 //💡 등수 대신 가상 최종 점수 직격 입력
+  mockUserScore: 1 //💡 등수 대신 가상 최종 점수 직격 입력
 };
 
 // 랭킹판용 변수들
@@ -167,6 +166,7 @@ let titleWarpTimer = 0;
 let crashTimer = 0; 
 let warpTimer = 0;
 let pickupTimer = 0; 
+let cutoffScore = 0; //10만등의 점수 - 이보다 점수가 낮을 경우 게임오버 화면으로 직행
 
 // === [광고 기능 구현 STEP 1] 타이틀 화면 테스트용 광고 변수 선언 ===
 let titleAdImg = new Image();
@@ -832,6 +832,32 @@ async function sendGlobalScore(fullName, finalScore) {
     }
 }
 
+// 백그라운드 컷오프 점수 비동기 조회 함수
+async function fetchCutoffScore() {
+    // Supabase REST API: 점수 내림차순 정렬 후 10만 번째(offset=99999) 데이터 1개만 조회
+    const URL = `https://${PROJECT_ID}.supabase.co/rest/v1/leaderboard?select=score&order=score.desc,created_at.desc&limit=1&offset=99999`;
+    
+    try {
+        const response = await fetch(URL, {
+            method: 'GET',
+            headers: { 
+                'apikey': SUPABASE_ANON_KEY,
+                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+            }
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            if (data && data.length > 0) {
+                cutoffScore = data[0].score;
+                console.log(`📡 [관제탑] 10만등 커트라인 갱신 완료: ${cutoffScore}점`);
+            }
+        }
+    } catch (e) {
+        console.error("❌ 커트라인 조회 실패 (기본값 유지):", e);
+    }
+}
+
 // 📡 서버 검문소에 무선 패킷을 쏴서 내가 진짜 10만 등 안에 들었는지 판정하는 비동기 엔진
 async function checkIsHighScore(finalScore) { 
     if (finalScore <= 0) return false; // 0점 오폭 등록은 원천 차단하네.
@@ -1137,6 +1163,9 @@ function startGame(forceNew = false) {
     gameState = 'TITLEWARP';
     titleWarpTimer = 0;
     messageBox.classList.add('hidden');
+	
+	// 🚀 워프 연출(4초) 동안 백그라운드에서 10만등 커트라인 점수 캐싱
+    fetchCutoffScore();
 }
 
 function resetStage() {
@@ -1195,9 +1224,15 @@ async function gameOver() {
     // 🎯 완전히 패배하여 전멸했으니 로컬 세이브 데이터를 흔적도 없이 삭제하네!
     SaveSystem.clear();
 
-    // 📡 [핵심 수술]: 서버 검문소의 결과(true/false)가 무전으로 도착할 때까지 이 자리에서 얌전히 기다리네!
-    isPlayerRanked = await checkIsHighScore(score); 
+    // 📡 미리 캐싱해둔 cutoffScore와 내 점수를 비교해 랭킹 진입 여부 판단
+    isPlayerRanked = (score > 0 && score >= cutoffScore); 
     
+    // 🏆 랭킹 진입 성공 시, 실시간 리더보드 데이터 조회 및 스크롤 타겟 연산 가동
+    if (isPlayerRanked) {
+        isFinalView = false;
+        fetchGlobalScores();
+    }
+
     // 🎰 점수판 연출(SCORE_DISPLAY)로 우선 전원 투입!
     gameState = 'SCORE_DISPLAY';
     displayedScore = 0;
@@ -1211,15 +1246,9 @@ async function gameOver() {
 // 🔄 [신규] 점수판 화면 종료 시 갈림길 전이 엔진
 async function transitionFromScoreDisplay() {
     if (isPlayerRanked) {
-        // 🏆 [랭크인 성공]: 이름 입력 단계(INPUT)로 정격 전이!
-        if (DEBUG_MODE.enable) {
-            gameState = 'INPUT';
-        } else {
-            gameState = 'INPUT';
-            highscoreInput.classList.remove('hidden');
-            initialsField.value = "";
-            initialsField.focus();
-        }
+        // 🏆 [랭크인 성공]: 캔버스 가상 자판(INPUT) 입력 단계로 정격 전이!
+        gameState = 'INPUT';
+        initVirtualKeyboard(); // ⌨️ 가상 자판 키 레이아웃 즉시 예열!
     } else {
         // 💀 [랭크인 실패]: 다시 시작(START) 타이틀 화면으로 전원 회항!
         gameState = 'START';
@@ -1789,31 +1818,25 @@ function update(dt) {
 	// =================================================================
     // 🎯 [로건의 SF 기계식 S자형 댐퍼 가속 및 0.6초 시동 대기 시스템]
     // =================================================================
-    if ((gameState === 'LEADERBOARD' || gameState === 'INPUT') && DEBUG_MODE.enable) {
+    if (gameState === 'LEADERBOARD' || gameState === 'INPUT') { // 💡 DEBUG_MODE.enable 제약 제거!
         if (!isScrollFinished) {
             if (scrollDelayTimer > 0) {
                 // 🔌 [1단계: 시동 대기] 진입 즉시 0.6초간 움직이지 않고 상황 인지 유도!
                 scrollDelayTimer -= dt / TIME_SCALE;
                 scrollY = startScrollY;
             } else {
-                // 💡 [자네의 기획 반영]: 스크롤 거리 계산 후 동적 분기 처리
-
                 let scrollDist = Math.abs(targetScrollY - startScrollY);
 
                 if (scrollDist === 0) {
-                    // 3. 스크롤이 없는 경우: 0.6초 대기 종료 즉시 완료 상태로 도킹!
                     scrollY = targetScrollY;
                     isScrollFinished = true;
                     keyboardDelayTimer = 0.35;
                 } else {
-                    // 1, 2. 스크롤이 있는 경우: 거리에 비례하여 주행 시간(Duration)을 역산
                     scrollTimeActive += dt / TIME_SCALE;
                     
-                    // 거리가 짧을수록 연출 시간을 동적으로 줄여 지루함을 방지하네. (최소 1.2초 ~ 최대 7.0초)
                     let dynamicDuration = Math.max(1.2, Math.min(7.0, scrollDist / 200)); 
                     let t = Math.min(1.0, scrollTimeActive / dynamicDuration);
 
-                    // Cubic Ease-In-Out 보간 연산(Interpolation calculation)으로 가감속 구현
                     let ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
                     scrollY = startScrollY + (targetScrollY - startScrollY) * ease;
 
@@ -1821,12 +1844,12 @@ function update(dt) {
                         scrollY = targetScrollY;
                         isScrollFinished = true;
                         keyboardDelayTimer = 0.35;
-                        console.log("🎯 [시뮬레이터] S자 가변 스크롤 드라이브 도킹 완료!");
+                        console.log("🎯 S자 가변 스크롤 드라이브 도킹 완료!");
                     }
                 }
-			}
-            } else {
-            // 🔌 [3단계: 지연 공급] 정지 완료 후 0.7초 후에 비로소 자판 전원 공급!
+            }
+        } else {
+            // 🔌 [3단계: 지연 공급] 정지 완료 후 0.35초 후에 비로소 자판 전원 공급!
             if (keyboardDelayTimer > 0) {
                 keyboardDelayTimer -= dt;
                 if (keyboardDelayTimer <= 0) {
@@ -3652,10 +3675,12 @@ if (DEBUG_MODE.enable) {
     setupScrollTest(DEBUG_MODE.testTier, DEBUG_MODE.mockUserScore);
     initVirtualKeyboard();
 
-    // 2️⃣ 역산된 등수를 추출하여 랭킹 진입 한계선 판정 동적 동기화
-    let calculatedRank = 100001 - DEBUG_MODE.mockUserScore;
+    // 2️⃣ 롤업 연출 시간 연산 및 디버그 티어 기반 랭킹 진입 판정
     scoreRollDuration = Math.max(0.5, Math.min(3.0, score / 15000));
-    isPlayerRanked = (DEBUG_MODE.testTier !== 5 && calculatedRank <= 100000);
+    
+    // 💡 [수정]: 1점을 10만등으로 계산하던 잘못된 뺄셈 공식(calculatedRank) 파쇄!
+    // 디버그 모드에서는 testTier가 5(탈락 연출 테스트)가 아니고 점수가 0점 초과일 때만 랭킹 진입 판정하네.
+    isPlayerRanked = (DEBUG_MODE.testTier !== 5 && score > 0);
 
     // 3️⃣ 슬롯머신 디스플레이 시퀀스 시동
     gameState = 'SCORE_DISPLAY'; 
