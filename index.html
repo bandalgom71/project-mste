@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="robots" content="noindex, nofollow">
-    <title>MSTE v9.0</title>
+    <title>MSTE v10.0</title>
     
     <script src="stages.js"></script>
 
@@ -133,6 +133,7 @@ let scoreRollDuration = 3.0;      // ⏱️ [신규] 점수 크기에 따라 동
 let scoreDisplayHoldTimer = 0;    // 롤업 완료 후 대기용 타이머
 let isPlayerRanked = false;       // 👑 [신규] 10만 위 랭킹 진입 성공 여부 플래그
 let isFinalView = false;          // 랭킹보드 리뷰 화면 상태인가?
+let finalHoldTimer = 0; // ⏱️ [v10.0] 랭킹보드 최종 연출 10초 회항 타이머
 
 // 🛸 [MSTE v9.0] Supabase 기지국 및 마스터 열쇠 배선 완비
 const PROJECT_ID = "oochauzsxeqcvxsscztm";
@@ -182,6 +183,16 @@ titleAdImg.onload = function() {
 
 // 📦 버추얼 키보드 초기화
 let virtualKeys = [];
+// 가상 키보드 키 생성 시 추가할 속성들
+const keyboardKeys = [
+    // 예시: 기존 키 생성 데이터 구조
+    // { char: 'A', x: 100, y: 500, width: 40, height: 50 ... }
+].map(key => ({
+    ...key,
+    targetY: key.y,        // 🎯 최종 도달 위치 (원래 Y 좌표)
+    currentY: key.y,       // 📍 현재 화면에 그려질 Y 좌표
+    isRespawning: false    // ⏳ 위에서 떨어지는 중인지 여부 (연타 방지 플래그)
+}));
 
 const PICKUP_COOLDOWN = 0.2; 
 
@@ -1339,6 +1350,11 @@ window.addEventListener('mousedown', (e) => {
         }
         isDragging = false;
     }
+	else if (gameState === 'LEADERBOARD' && isScrollFinished) {
+        finalHoldTimer = 0;
+        gameState = 'START';
+        messageBox.classList.remove('hidden');
+    }
     else if (gameState === 'TRANSITION') {
         handleUiClick();
     }
@@ -1401,7 +1417,11 @@ window.addEventListener('touchstart', (e) => {
 			}
 		}
 	}
-    else if (gameState === 'LEADERBOARD') { e.preventDefault(); startGame(false); }
+	else if (gameState === 'LEADERBOARD' && isScrollFinished) {
+        finalHoldTimer = 0;
+        gameState = 'START';
+        messageBox.classList.remove('hidden');
+    }
     else if (gameState === 'PLAY') { 
         e.preventDefault();
         const touch = e.touches[0];
@@ -1854,6 +1874,16 @@ function update(dt) {
                 keyboardDelayTimer -= dt;
                 if (keyboardDelayTimer <= 0) {
                     isKeyboardActive = true; 
+                }
+            }
+			
+			// ⏱️ [v10.0] 스크롤 도킹이 끝난 최종 연출 화면에서 10초 타이머 가동
+            if (isFinalView || gameState === 'LEADERBOARD') {
+                finalHoldTimer += dt / TIME_SCALE;
+                if (finalHoldTimer >= 10.0) {
+                    finalHoldTimer = 0;
+                    gameState = 'START';
+                    messageBox.classList.remove('hidden');
                 }
             }
         }
@@ -3209,12 +3239,69 @@ function draw() {
 				});
 			}
 			
-            if (gameState === 'LEADERBOARD' && isScrollFinished && Math.floor(Date.now() / 500) % 2 === 0) { 
-				ctx.fillStyle = '#666666'; ctx.textAlign = 'center'; ctx.fillText("[ CLICK TO RESTART ]", GAME_WIDTH/2, GAME_HEIGHT - 50); 
+			// =================================================================
+			// 🌌 [MSTE v10.0] EARTH REMEMBERS YOU (2-Pass 연출) & PLAY AGAIN (#eeeeee)
+			// =================================================================
+			if (isScrollFinished && (isFinalView || gameState === 'LEADERBOARD')) {
+				ctx.save();
+
+				// 1️⃣ 윗줄: EARTH REMEMBERS YOU (2-Pass 렌더링 적용)
+				const textWave = "EARTH REMEMBERS YOU";
+				ctx.font = 'bold 40px "Neo Dunggeunmo"';
+				ctx.textAlign = 'left';
+				ctx.textBaseline = 'middle';
+
+				const totalWidth = ctx.measureText(textWave).width;
+				let currentX = (GAME_WIDTH - totalWidth) / 2;
+				
+				const nowSec = performance.now() * 0.001;
+				const cycleLength = 2.5;         // 2.5초 주기
+				const phaseOffsetPerChar = 0.08; // 글자당 0.08초 위상차
+
+				textWave.split('').forEach((char, i) => {
+					const charWidth = ctx.measureText(char).width;
+					
+					// 빛이 좌측에서 우측으로 흐르는 위상 연산
+					const phase = (nowSec + (textWave.length - i) * phaseOffsetPerChar) % cycleLength;
+					const wave = (Math.sin((phase / cycleLength) * Math.PI * 2) + 1) / 2; // 0.0 ~ 1.0 파동
+					const brightness = 0.2 + wave * 0.8; // 0.2 ~ 1.0 범위
+
+					// 🔹 [1차 패스] 백그라운드 네온 글로우 (Shadow 번짐 효과)
+					ctx.save();
+					ctx.shadowColor = '#ffffff';
+					ctx.shadowBlur = 15 + wave * 20; // 15~35px 네온 확산
+					ctx.fillStyle = `rgba(255, 255, 255, ${brightness})`;
+					ctx.fillText(char, currentX, GAME_HEIGHT - 195);
+					ctx.restore();
+
+					// 🔹 [2차 패스] 코어 텍스트 오버레이 (Shadow 제거 후 또렷한 픽셀 선명도 확보)
+					ctx.save();
+					ctx.shadowColor = 'transparent';
+					ctx.shadowBlur = 0;
+					ctx.fillStyle = `rgba(255, 255, 255, ${brightness})`;
+					ctx.fillText(char, currentX, GAME_HEIGHT - 195);
+					ctx.restore();
+
+					currentX += charWidth;
+				});
+
+				// 2️⃣ 아랫줄: PLAY AGAIN (#eeeeee 색상 적용 및 점멸)
+				if (Math.floor(performance.now() / 700) % 2 === 0) {
+				   ctx.save();
+				   ctx.shadowColor = 'transparent';  // 글로우 완전 제거 — 존재감을 확실히 낮춤
+				   ctx.shadowBlur = 0;
+				   ctx.fillStyle = 'rgba(238, 238, 238, 0.9)';
+				   ctx.font = '28px "Neo Dunggeunmo"';           
+				   ctx.textAlign = 'center';
+				   ctx.textBaseline = 'middle';
+				   ctx.fillText("PLAY AGAIN", GAME_WIDTH / 2, GAME_HEIGHT - 130); // 115 → 130
+				   ctx.restore();
+				}
+
+				ctx.restore();
 			}
-        }
-        
-        ctx.restore(); return;
+        }        
+        return;
     }
 		
 	if (gameState === 'PLAY' || gameState === 'TRANSITION' || gameState === 'FAIL' || gameState === 'INPUT' || gameState === 'CRASHED' || gameState === 'WARP' || gameState === 'PAUSE') {
