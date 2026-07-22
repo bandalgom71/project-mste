@@ -1254,12 +1254,26 @@ async function gameOver() {
     scoreRollDuration = Math.max(0.5, Math.min(3.0, score / 15000));
 }
 
-// 🔄 [신규] 점수판 화면 종료 시 갈림길 전이 엔진
+// 🔄 점수판 화면 종료 시 갈림길 전이 엔진
 async function transitionFromScoreDisplay() {
     if (isPlayerRanked) {
         // 🏆 [랭크인 성공]: 캔버스 가상 자판(INPUT) 입력 단계로 정격 전이!
         gameState = 'INPUT';
-        initVirtualKeyboard(); // ⌨️ 가상 자판 키 레이아웃 즉시 예열!
+        
+        // 🧹 [전장 잔재 완벽 세척 프로토콜]
+        particles = [];             // 💥 잔상 파티클 및 충격파 파쇄
+        items = [];                 // 🔢 잔여 숫자/기호 아이템 파쇄 (Easy-Busy 만료 폭발 차단)
+        enemies = [];               // 👾 잔여 적 기체 파쇄
+        bullets = [];               // 🔫 비행 중인 총알 파쇄
+        supportBeams = [];          // ⚡ 지연 발사 지원사격 빔 타임라인 취소
+        scrollingTexts = [];        // 📜 잔여 스크롤 텍스트 파쇄
+        ads = [];                   // 📺 잔여 광고판 데이터 파쇄
+        activeItems = { easyBusy: 0, penetration: 0, timeStop: 0, heavyRotation: 0 }; // ⏱️ 버프 타이머 즉시 초기화
+        document.querySelectorAll('.ingame-ad').forEach(el => el.remove()); // 🖼️ DOM 광고판 엘리먼트 제거
+
+        isKeyboardActive = false;   // 🔌 화면 전환 직후 자판 입력 일시 차단
+        keyboardDelayTimer = 0.35;  // ⏱️ 0.35초 입력 방화벽(Input Guard) 가동
+        initVirtualKeyboard();      // ⌨️ 가상 자판 키 레이아웃 즉시 예열!
     } else {
         // 💀 [랭크인 실패]: 다시 시작(START) 타이틀 화면으로 전원 회항!
         gameState = 'START';
@@ -1886,8 +1900,48 @@ function update(dt) {
                     messageBox.classList.remove('hidden');
                 }
             }
+			
+			// ⌨️ 가상 키보드 폭발 후 가속 낙하 및 입력 잠금 해제 연산
+			if (gameState === 'INPUT') {
+				// 🎯 [속도 조정 포인트] 기존 450에서 180으로 감속 (원하는 속도로 수치 변경 가능)
+				const dropSpeed = 180; 
+
+				virtualKeys.forEach(key => {
+					if (key.isRespawning) {
+						if (key.respawnTimer > 0) {
+							// ⏱️ 폭발 연출 동안 대기 (키 숨김 유지)
+							key.respawnTimer -= dt / TIME_SCALE;
+						} else {
+							// 🪂 대기 종료 후 상단에서 천천히 하강
+							key.currentY += dropSpeed * (dt / TIME_SCALE);
+							if (key.currentY >= key.targetY) {
+								key.currentY = key.targetY;
+								key.isRespawning = false; // 🔓 입력 재개
+							}
+						}
+					}
+				});
+			}		
         }
     }
+	
+	if (gameState === 'INPUT') {
+		for (let i = particles.length - 1; i >= 0; i--) {
+			let p = particles[i];
+			p.life -= (p.decay || 1.0) * (dt / TIME_SCALE);
+			if (p.type === 'text') p.y += p.vy * (dt / TIME_SCALE);
+			else if (p.type === 'spark') { 
+				p.x += p.vx * (dt / TIME_SCALE); 
+				p.y += p.vy * (dt / TIME_SCALE); 
+				p.vx *= 0.9; 
+				p.vy *= 0.9; 
+			}
+			else if (p.type === 'shockwave' || p.type === 'shockwave_visual') { 
+				p.size += (p.maxSize - p.size) * 3 * (dt / TIME_SCALE); 
+			}
+			if (p.life <= 0) particles.splice(i, 1);
+		}
+	}
     // =================================================================
 	
 	// 🛸 [로건의 TITLEWARP 인트로 타임라인 관리자]
@@ -3180,10 +3234,25 @@ function draw() {
 
             ctx.restore();
             // =================================================================
-			// 👽 [로건의 아케이드 11열 가상 키보드 - 전원 온/오프 디지털 연출 버전]
+			// 👽 [MSTE v10.0] 가상 키보드 렌더링 (낙하 페이드인 알파 연출 추가)
+			// =================================================================
 			if (gameState === 'INPUT') {
 				virtualKeys.forEach(key => {
+					// 💥 폭발 대기 중(respawnTimer > 0)일 때는 그리지 않고 숨김
+					if (key.isRespawning && key.respawnTimer > 0) return;
+
 					ctx.save();
+
+					// ✨ [알파 페이드인 연출] 낙하 진행률에 따라 투명도를 0.2에서 1.0으로 보간
+					if (key.isRespawning) {
+						const startY = key.targetY - 80; // 상단 사출 원점 (80px 위)
+						// 0.0(낙하 시작) ~ 1.0(착지 완료) 진행률 연산
+						const fallProgress = Math.min(1.0, Math.max(0.0, (key.currentY - startY) / 80)); 
+						
+						// 처음엔 0.2(20% 불투명도)로 희미하다가 착지 시 1.0(100% 불투명도)으로 또렷해짐
+						ctx.globalAlpha = 0.2 + (fallProgress * 0.8);
+					}
+
 					ctx.beginPath();
 					
 					// 1. 모서리 반경 12px 둥근 사각형 기틀
@@ -3191,37 +3260,33 @@ function draw() {
 					
 					// 2. [키 배경]: 스크롤 완료 여부에 따라 불이 켜지는 강도 조율
 					if (isKeyboardActive) {
-						// 🔌 [전원 ON] 스크롤 정착 완료 상태
 						if (key.char === '⌫' || key.char === 'OK' || key.char === 'SPACE' || key.char === 'DONE') {
-							ctx.fillStyle = 'rgba(255, 255, 255, 0.75)'; // 제어키 75% 불투명 흰색
+							ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
 						} else {
-							ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';  // 일반키 50% 불투명 흰색
+							ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
 						}
 					} else {
-						// 🔌 [전원 OFF] 스크롤 대기 상태 (자네가 조율한 15% 어두운 패널)
 						if (key.char === '⌫' || key.char === 'OK' || key.char === 'SPACE' || key.char === 'DONE') {
-							ctx.fillStyle = 'rgba(255, 255, 255, 0.15)'; // 제어키 15% 반투명
+							ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
 						} else {
-							ctx.fillStyle = 'rgba(255, 255, 255, 0.15)'; // 일반키 15% 반투명
+							ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
 						}
 					}
 					ctx.fill();
 
-					// 3. [키 테두리]: 경계 유지를 위한 은은한 아웃라인 (동일 유지)
+					// 3. [키 테두리]: 은은한 아웃라인
 					ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
 					ctx.lineWidth = 1;
 					ctx.stroke();
 
 					// 4. [글씨 색상]: 전원 인가 시 고대비 시인성 사수
 					if (isKeyboardActive) {
-						// 🔌 [전원 ON]
 						if (key.char === '⌫' || key.char === 'OK' || key.char === 'SPACE' || key.char === 'DONE') {
-							ctx.fillStyle = '#000000'; // 제어키는 묵직한 검은색 유지
+							ctx.fillStyle = '#000000';
 						} else {
-							ctx.fillStyle = '#ffffff'; // 일반키는 선명한 순백색으로 전원 인가!
+							ctx.fillStyle = '#ffffff';
 						}
 					} else {
-						// 🔌 [전원 OFF] 어두운 검은색으로 패널에 묻어둠
 						ctx.fillStyle = '#000000';
 					}
 
@@ -3235,6 +3300,26 @@ function draw() {
 					ctx.textBaseline = 'middle';
 					
 					ctx.fillText(key.char, key.x + key.width / 2, key.currentY + key.height / 2 + 2);
+					
+					ctx.restore(); // 🛡️ 개별 키의 투명도(globalAlpha) 설정이 다른 그래픽에 영향을 주지 않도록 복원
+				});
+
+				// 💥 자판 레이어 위에 폭발 파티클 렌더링
+				particles.forEach(p => {
+					ctx.save();
+					ctx.globalAlpha = p.life;
+					if (p.type === 'spark') {
+						ctx.fillStyle = p.color;
+						ctx.beginPath();
+						ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+						ctx.fill();
+					} else if (p.type === 'shockwave' || p.type === 'shockwave_visual') {
+						ctx.strokeStyle = p.color;
+						ctx.lineWidth = 5 * p.life;
+						ctx.beginPath();
+						ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+						ctx.stroke();
+					}
 					ctx.restore();
 				});
 			}
@@ -3918,15 +4003,16 @@ function initVirtualKeyboard() {
             let x = startX + colIndex * (keyW + gap);
             let y = startY + r * (keyH + gap);
 
-            virtualKeys.push({
-                char: char,
-                x: x,
-                targetY: y,
-                currentY: y,
-                width: width,
-                height: keyH,
-                state: 'ACTIVE'
-            });
+			virtualKeys.push({
+				char: char,
+				x: x,
+				targetY: y,
+				currentY: y,
+				width: width,
+				height: keyH,
+				isRespawning: false,
+				respawnTimer: 0 // 💥 [신규] 폭발 연출 대기 타이머
+			});
 
             colIndex += span;
         }
@@ -3934,34 +4020,48 @@ function initVirtualKeyboard() {
 }
 
 // =================================================================
-// ⌨️ [로건의 조작계 패치] 가상 키보드 입력 처리 핵심 엔진 함수
+// ⌨️ [MSTE v10.0] 가상 키보드 터치 폭발 & Y축 사출 연출
 // =================================================================
 function handleVirtualKeyPress(mx, my) {
     for (let key of virtualKeys) {
-        // 사각형 바운딩 박스(AABB Bounding Box) 충돌 검사
         if (mx >= key.x && mx <= key.x + key.width &&
             my >= key.currentY && my <= key.currentY + key.height) {
             
+            // 🚫 이미 터져서 떨어지는 중이거나 대기 중인 키는 무시
+            if (key.isRespawning) return;
+
+            // 💥 1. 적 폭발 이펙트 & 베이스 효과음 격발
+            const centerX = key.x + key.width / 2;
+            const centerY = key.currentY + key.height / 2;
+            spawnExplosion(centerX, centerY, 'medium', "", 1, 1);
+            
+            if (typeof SoundManager !== 'undefined' && SoundManager.playBassExplosion) {
+                SoundManager.playBassExplosion(0);
+            }
+
+            // 🚀 2. 키 숨김 및 폭발 대기 세팅 (0.25초 후 상단에서 낙하 시작)
+            key.isRespawning = true;
+            key.respawnTimer = 0.25; 
+            key.currentY = key.targetY - 80; // 상단 사출 위치
+
+            // ⌨️ 3. 입력 로직
             if (key.char === '⌫') {
-                // 백스페이스: 마지막 글자 탈착 및 커서 자동 좌측 이동
                 if (currentInputName.length > 0) {
                     currentInputName = currentInputName.slice(0, -1);
                 }
             } else if (key.char === 'OK') {
-                // 기존 HTML 버튼의 타임존 감지 및 전송 파이프라인을 100% 재사용
                 initialsField.value = currentInputName;
                 submitBtn.click();
             } else {
-                // 최대 15글자 한계 수문장(Limit Guard) 가동
                 if (currentInputName.length < 15) {
                     if (key.char === 'SPACE') {
-                        currentInputName += " "; // 내부 버퍼(Memory Buffer)에는 순정 공백 적재
+                        currentInputName += " ";
                     } else {
                         currentInputName += key.char;
                     }
                 }
             }
-            SoundManager.playBlockSound(); // 타격 아날로그 오디오 피드백
+            SoundManager.playBlockSound();
             break;
         }
     }
